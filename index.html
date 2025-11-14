@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tetris Game</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #000;
+            font-family: Arial, sans-serif;
+        }
+        #game-container {
+            text-align: center;
+        }
+        canvas {
+            border: 2px solid #fff;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <h1 style="color: #fff;">Tetris</h1>
+        <canvas id="tetris" width="240" height="400"></canvas>
+        <p style="color: #fff;">Use Arrow Keys to Play</p>
+    </div>
+    <script src="tetris.js"></script>
+</body>
+</html>
