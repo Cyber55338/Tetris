@@ -109,6 +109,35 @@ class ComfyUIApp {
             this.canvasRenderer.resetZoom();
         });
 
+        document.getElementById('btn-fit-view').addEventListener('click', () => {
+            this.canvasRenderer.fitToView();
+        });
+
+        // Minimap toggle
+        document.getElementById('minimap-toggle').addEventListener('click', (e) => {
+            e.stopPropagation();
+            document.getElementById('minimap-container').classList.toggle('collapsed');
+        });
+
+        // Minimap header click to toggle
+        document.querySelector('.minimap-header').addEventListener('click', (e) => {
+            if (e.target.classList.contains('minimap-toggle') || e.target.closest('.minimap-toggle')) {
+                return; // Let the button handle it
+            }
+            document.getElementById('minimap-container').classList.toggle('collapsed');
+        });
+
+        // Minimap canvas click to navigate
+        document.getElementById('minimap-canvas').addEventListener('click', (e) => {
+            const rect = e.target.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const clickY = e.clientY - rect.top;
+
+            // This would require converting minimap coordinates to canvas coordinates
+            // For now, just center the view on click
+            this.canvasRenderer.fitToView();
+        });
+
         // Canvas events
         this.canvas.addEventListener('mousedown', (e) => this.onCanvasMouseDown(e));
         this.canvas.addEventListener('mousemove', (e) => this.onCanvasMouseMove(e));
@@ -421,6 +450,12 @@ class ComfyUIApp {
             this.canvasRenderer.resetZoom();
         }
 
+        // Fit to view
+        if (e.key === 'f' || e.key === 'F') {
+            e.preventDefault();
+            this.canvasRenderer.fitToView();
+        }
+
         // Escape - deselect all
         if (e.key === 'Escape') {
             this.canvasRenderer.deselectAll();
@@ -447,6 +482,7 @@ class ComfyUIApp {
                     <polyline points="6 9 12 15 18 9"/>
                 </svg>
                 ${categoryInfo.icon} ${categoryInfo.title}
+                <span class="category-badge">${nodes.length}</span>
             `;
 
             header.addEventListener('click', () => {

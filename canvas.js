@@ -199,6 +199,9 @@ class CanvasRenderer {
 
         // Restore state
         ctx.restore();
+
+        // Render minimap
+        this.renderMinimap();
     }
 
     // Draw grid background
@@ -404,6 +407,118 @@ class CanvasRenderer {
             truncated = truncated.slice(0, -1);
         }
         return truncated + '...';
+    }
+
+    // Render minimap
+    renderMinimap() {
+        const minimapCanvas = document.getElementById('minimap-canvas');
+        if (!minimapCanvas || this.nodes.length === 0) return;
+
+        const minimapCtx = minimapCanvas.getContext('2d');
+        const minimapWidth = minimapCanvas.width;
+        const minimapHeight = minimapCanvas.height;
+
+        // Clear minimap
+        minimapCtx.clearRect(0, 0, minimapWidth, minimapHeight);
+        minimapCtx.fillStyle = '#1a1a1a';
+        minimapCtx.fillRect(0, 0, minimapWidth, minimapHeight);
+
+        // Calculate bounds of all nodes
+        let minX = Infinity, minY = Infinity;
+        let maxX = -Infinity, maxY = -Infinity;
+
+        this.nodes.forEach(node => {
+            minX = Math.min(minX, node.x);
+            minY = Math.min(minY, node.y);
+            maxX = Math.max(maxX, node.x + node.width);
+            maxY = Math.max(maxY, node.y + node.height);
+        });
+
+        const workflowWidth = maxX - minX + 200; // Add padding
+        const workflowHeight = maxY - minY + 200;
+
+        // Calculate scale to fit minimap
+        const scaleX = minimapWidth / workflowWidth;
+        const scaleY = minimapHeight / workflowHeight;
+        const minimapScale = Math.min(scaleX, scaleY) * 0.9;
+
+        // Center the view
+        const offsetX = (minimapWidth - workflowWidth * minimapScale) / 2 - minX * minimapScale + 100 * minimapScale;
+        const offsetY = (minimapHeight - workflowHeight * minimapScale) / 2 - minY * minimapScale + 100 * minimapScale;
+
+        minimapCtx.save();
+        minimapCtx.translate(offsetX, offsetY);
+        minimapCtx.scale(minimapScale, minimapScale);
+
+        // Draw connections
+        if (window.connectionManager) {
+            minimapCtx.strokeStyle = '#5a9fd4';
+            minimapCtx.lineWidth = 2 / minimapScale;
+            window.connectionManager.connections.forEach(conn => {
+                const start = conn.outputNode.getOutputPosition(conn.outputIndex);
+                const end = conn.inputNode.getInputPosition(conn.inputIndex);
+                minimapCtx.beginPath();
+                minimapCtx.moveTo(start.x, start.y);
+                minimapCtx.lineTo(end.x, end.y);
+                minimapCtx.stroke();
+            });
+        }
+
+        // Draw nodes as small rectangles
+        this.nodes.forEach(node => {
+            minimapCtx.fillStyle = node.selected ? '#5a9fd4' : node.color || '#404040';
+            minimapCtx.fillRect(node.x, node.y, node.width, node.height);
+        });
+
+        // Draw viewport rectangle
+        const viewX = -this.offsetX / this.scale;
+        const viewY = -this.offsetY / this.scale;
+        const viewWidth = this.canvas.width / this.scale;
+        const viewHeight = this.canvas.height / this.scale;
+
+        minimapCtx.strokeStyle = '#5a9fd4';
+        minimapCtx.lineWidth = 2 / minimapScale;
+        minimapCtx.strokeRect(viewX, viewY, viewWidth, viewHeight);
+        minimapCtx.fillStyle = 'rgba(90, 159, 212, 0.1)';
+        minimapCtx.fillRect(viewX, viewY, viewWidth, viewHeight);
+
+        minimapCtx.restore();
+    }
+
+    // Fit view to show all nodes
+    fitToView(padding = 100) {
+        if (this.nodes.length === 0) return;
+
+        let minX = Infinity, minY = Infinity;
+        let maxX = -Infinity, maxY = -Infinity;
+
+        this.nodes.forEach(node => {
+            minX = Math.min(minX, node.x);
+            minY = Math.min(minY, node.y);
+            maxX = Math.max(maxX, node.x + node.width);
+            maxY = Math.max(maxY, node.y + node.height);
+        });
+
+        const workflowWidth = maxX - minX;
+        const workflowHeight = maxY - minY;
+        const workflowCenterX = minX + workflowWidth / 2;
+        const workflowCenterY = minY + workflowHeight / 2;
+
+        // Calculate scale to fit
+        const scaleX = this.canvas.width / (workflowWidth + padding * 2);
+        const scaleY = this.canvas.height / (workflowHeight + padding * 2);
+        const newScale = Math.min(scaleX, scaleY, 1); // Don't zoom in more than 100%
+
+        // Center the view
+        this.scale = newScale;
+        this.offsetX = this.canvas.width / 2 - workflowCenterX * newScale;
+        this.offsetY = this.canvas.height / 2 - workflowCenterY * newScale;
+
+        this.render();
+
+        if (window.updateZoomDisplay) {
+            window.updateZoomDisplay(this.scale);
+        }
     }
 
     // Get all nodes as JSON

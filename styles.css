@@ -598,3 +598,97 @@ body {
 @keyframes spin {
     to { transform: rotate(360deg); }
 }
+
+/* Minimap */
+.minimap-container {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    background: rgba(36, 36, 36, 0.95);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: var(--shadow-lg);
+    z-index: 100;
+    transition: all var(--transition-normal);
+}
+
+.minimap-container.collapsed {
+    height: 32px;
+    overflow: hidden;
+}
+
+.minimap-container.collapsed #minimap-canvas {
+    display: none;
+}
+
+.minimap-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+}
+
+.minimap-toggle {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    transition: all var(--transition-fast);
+}
+
+.minimap-toggle:hover {
+    color: var(--text-primary);
+}
+
+.minimap-container.collapsed .minimap-toggle svg {
+    transform: rotate(180deg);
+}
+
+#minimap-canvas {
+    display: block;
+    cursor: pointer;
+    border-top: 1px solid var(--border-color);
+}
+
+#minimap-canvas:hover {
+    opacity: 0.9;
+}
+
+/* Connection Animation */
+@keyframes connection-flow {
+    0% { stroke-dashoffset: 0; }
+    100% { stroke-dashoffset: 20; }
+}
+
+.connection-animated {
+    animation: connection-flow 1s linear infinite;
+}
+
+/* Node pulse effect when selected */
+@keyframes node-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(90, 159, 212, 0.7); }
+    50% { box-shadow: 0 0 0 10px rgba(90, 159, 212, 0); }
+}
+
+/* Category badge for node count */
+.category-badge {
+    display: inline-block;
+    background: var(--bg-hover);
+    color: var(--text-muted);
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    margin-left: 6px;
+    font-weight: normal;
+}
