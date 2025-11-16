@@ -190,11 +190,17 @@ body {
 }
 
 .sidebar.collapsed {
-    transform: translateX(-100%);
+    width: 50px;
+    min-width: 50px;
+}
+
+.sidebar.collapsed .sidebar-content {
+    display: none;
 }
 
 .sidebar.sidebar-right.collapsed {
-    transform: translateX(100%);
+    width: 50px;
+    min-width: 50px;
 }
 
 .sidebar-header {
@@ -226,6 +232,137 @@ body {
 .collapse-btn:hover {
     background: var(--bg-hover);
     color: var(--text-primary);
+}
+
+/* Tabs */
+.tabs-container {
+    display: flex;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.tab-btn {
+    flex: 1;
+    padding: 10px 16px;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all var(--transition-fast);
+    border-bottom: 2px solid transparent;
+}
+
+.tab-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.tab-btn.active {
+    color: var(--accent-color);
+    border-bottom-color: var(--accent-color);
+    background: var(--bg-secondary);
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* Workflow Manager */
+.workflow-manager {
+    padding: 16px;
+}
+
+.workflow-list {
+    margin-top: 16px;
+}
+
+.workflow-item {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 8px;
+    transition: all var(--transition-fast);
+}
+
+.workflow-item:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-color);
+}
+
+.workflow-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.workflow-item-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.workflow-item-meta {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.workflow-item-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.btn {
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: none;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.btn-primary {
+    background: var(--accent-color);
+    color: white;
+    border: 1px solid var(--accent-color);
+}
+
+.btn-primary:hover {
+    background: #4a7fc4;
+    border-color: #4a7fc4;
+}
+
+.btn-secondary {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+}
+
+.btn-secondary:hover {
+    background: var(--bg-hover);
+}
+
+.btn-small {
+    padding: 4px 12px;
+    font-size: 12px;
+}
+
+.btn-danger {
+    background: #dc2626;
+    color: white;
+}
+
+.btn-danger:hover {
+    background: #b91c1c;
 }
 
 .sidebar-content {
@@ -599,6 +736,7 @@ body {
     to { transform: rotate(360deg); }
 }
 
+<<<<<<< HEAD
 /* Minimap */
 .minimap-container {
     position: absolute;
@@ -691,4 +829,81 @@ body {
     border-radius: 10px;
     margin-left: 6px;
     font-weight: normal;
+}
+
+/* Smartwatch Simulator */
+.smartwatch-simulator {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    height: 100%;
+    gap: 32px;
+}
+
+.smartwatch-screen {
+    width: 280px;
+    height: 280px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+    border: 8px solid #3a3a3a;
+    box-shadow:
+        0 0 0 2px #1a1a1a,
+        0 10px 30px rgba(0, 0, 0, 0.5),
+        inset 0 0 40px rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.smartwatch-screen::before {
+    content: '';
+    position: absolute;
+    top: 10%;
+    left: 10%;
+    width: 80%;
+    height: 80%;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.1) 0%, transparent 60%);
+    pointer-events: none;
+}
+
+.smartwatch-content {
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 14px;
+    z-index: 1;
+    padding: 20px;
+}
+
+.smartwatch-content svg {
+    margin-bottom: 12px;
+    opacity: 0.5;
+}
+
+.connect-btn {
+    padding: 14px 40px;
+    background: var(--accent-primary);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-normal);
+    box-shadow: var(--shadow-md);
+}
+
+.connect-btn:hover {
+    background: var(--accent-hover);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+}
+
+.connect-btn:active {
+    background: var(--accent-active);
+    transform: translateY(0);
 }

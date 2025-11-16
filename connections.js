@@ -31,20 +31,13 @@ class ConnectionManager {
 
     // Check if connection is valid based on type matching
     canConnect(outputPort, inputPort) {
-        // Can't connect same type ports (input to input or output to output)
-        if (!outputPort || !inputPort) return false;
-
-        // Check type compatibility
-        const outputType = outputPort.port.type;
-        const inputType = inputPort.port.type;
-
-        // ANY type can connect to anything
-        if (outputType.name === 'ANY' || inputType.name === 'ANY') {
-            return true;
+        // Basic null check
+        if (!outputPort || !inputPort) {
+            return false;
         }
 
-        // Otherwise types must match
-        return outputType.name === inputType.name;
+        // Allow all connections regardless of type
+        return true;
     }
 
     // Add a connection

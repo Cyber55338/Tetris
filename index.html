@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ComfyUI Clone - Node-Based Workflow Editor</title>
-    <link rel="stylesheet" href="styles.css">
+    <title>IDEA Engine - Node-Based Workflow Editor</title>
+    <link rel="stylesheet" href="styles.css?v=20251115e">
 </head>
 <body>
     <!-- Main Application Container -->
@@ -24,7 +24,7 @@
                         <line x1="8" y1="18" x2="10" y2="14"/>
                         <line x1="16" y1="18" x2="14" y2="14"/>
                     </svg>
-                    ComfyUI Clone
+                    IDEA Engine
                 </h1>
             </div>
             <div class="toolbar-section toolbar-actions">
@@ -57,6 +57,19 @@
                         <polygon points="5 3 19 12 5 21 5 3"/>
                     </svg>
                     Execute
+                </button>
+                <button id="btn-simulate" class="toolbar-btn btn-primary" title="Simulate on Smartwatch">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="5 3 19 12 5 21 5 3"/>
+                    </svg>
+                    Simulate
+                </button>
+                <button id="btn-send" class="toolbar-btn btn-primary" title="Send">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="22" y1="2" x2="11" y2="13"/>
+                        <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                    </svg>
+                    Send
                 </button>
                 <button id="btn-clear" class="toolbar-btn" title="Clear Canvas">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -105,17 +118,52 @@
             <!-- Left Sidebar - Node Library -->
             <div class="sidebar sidebar-left" id="node-library">
                 <div class="sidebar-header">
-                    <h2>Node Library</h2>
+                    <h2>Library</h2>
                     <button class="collapse-btn" id="collapse-library">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="15 18 9 12 15 6"/>
                         </svg>
                     </button>
                 </div>
+
+                <!-- Tabs -->
+                <div class="tabs-container">
+                    <button class="tab-btn active" data-tab="nodes">Nodes</button>
+                    <button class="tab-btn" data-tab="saved">Saved</button>
+                    <button class="tab-btn" data-tab="skills">Skills</button>
+                </div>
+
                 <div class="sidebar-content">
-                    <input type="text" id="node-search" class="search-input" placeholder="Search nodes...">
-                    <div class="node-categories" id="node-categories">
-                        <!-- Categories will be populated by JavaScript -->
+                    <!-- Nodes Tab -->
+                    <div class="tab-content active" id="tab-nodes">
+                        <input type="text" id="node-search" class="search-input" placeholder="Search nodes...">
+                        <div class="node-categories" id="node-categories">
+                            <!-- Categories will be populated by JavaScript -->
+                        </div>
+                    </div>
+
+                    <!-- Saved Tab -->
+                    <div class="tab-content" id="tab-saved">
+                        <div class="workflow-manager">
+                            <button class="btn btn-primary" id="save-workflow-btn">Save Current Workflow</button>
+                            <div id="save-workflow-form" class="hidden" style="margin-top: 12px;">
+                                <input type="text" id="workflow-name-input" class="search-input" placeholder="Workflow name..." style="margin-bottom: 8px;">
+                                <div style="display: flex; gap: 8px;">
+                                    <button class="btn btn-primary" id="confirm-save-btn">Save</button>
+                                    <button class="btn btn-secondary" id="cancel-save-btn">Cancel</button>
+                                </div>
+                            </div>
+                            <div class="workflow-list" id="workflow-list">
+                                <!-- Workflow list will be populated by JavaScript -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Skills Tab -->
+                    <div class="tab-content" id="tab-skills">
+                        <div class="skills-manager">
+                            <p style="color: #888; padding: 20px; text-align: center;">Skills feature coming soon...</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -179,10 +227,10 @@
     <input type="file" id="file-input" accept=".json" style="display: none;">
 
     <!-- Scripts -->
-    <script src="nodes.js"></script>
+    <script src="nodes.js?v=20251115d"></script>
     <script src="canvas.js"></script>
     <script src="connections.js"></script>
     <script src="workflow.js"></script>
-    <script src="comfyui.js"></script>
+    <script src="comfyui.js?v=20251115d"></script>
 </body>
 </html>
