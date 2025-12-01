@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IDEA Engine - Node-Based Workflow Editor</title>
-    <link rel="stylesheet" href="styles.css?v=20251115e">
+    <link rel="stylesheet" href="styles.css?v=20251124b">
 </head>
 <body>
     <!-- Main Application Container -->
@@ -12,20 +12,10 @@
         <!-- Top Toolbar -->
         <div class="toolbar">
             <div class="toolbar-section">
-                <h1 class="app-title">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="3"/>
-                        <circle cx="6" cy="6" r="2"/>
-                        <circle cx="18" cy="6" r="2"/>
-                        <circle cx="6" cy="18" r="2"/>
-                        <circle cx="18" cy="18" r="2"/>
-                        <line x1="8" y1="6" x2="10" y2="10"/>
-                        <line x1="16" y1="6" x2="14" y2="10"/>
-                        <line x1="8" y1="18" x2="10" y2="14"/>
-                        <line x1="16" y1="18" x2="14" y2="14"/>
-                    </svg>
-                    IDEA Engine
-                </h1>
+                <a href="/" class="app-logo">
+                    <img src="logo-icon.svg" alt="IDEA Engine Icon" class="logo-icon">
+                    <img src="logo-letters.svg" alt="IDEA Engine" class="logo-letters">
+                </a>
             </div>
             <div class="toolbar-section toolbar-actions">
                 <button id="btn-new" class="toolbar-btn" title="New Workflow (Ctrl+N)">
@@ -44,6 +34,13 @@
                         <polyline points="7 3 7 8 15 8"/>
                     </svg>
                     Save
+                </button>
+                <button id="btn-clear" class="toolbar-btn" title="Clear Canvas">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                    Clear
                 </button>
                 <button id="btn-load" class="toolbar-btn" title="Load Workflow (Ctrl+O)">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -71,13 +68,6 @@
                     </svg>
                     Send
                 </button>
-                <button id="btn-clear" class="toolbar-btn" title="Clear Canvas">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="3 6 5 6 21 6"/>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                    </svg>
-                    Clear
-                </button>
             </div>
             <div class="toolbar-section">
                 <div class="zoom-controls">
@@ -97,16 +87,17 @@
                             <line x1="21" y1="21" x2="16.65" y2="16.65"/>
                         </svg>
                     </button>
-                    <button id="btn-zoom-reset" class="toolbar-btn" title="Reset Zoom (0)">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="10"/>
-                            <line x1="12" y1="8" x2="12" y2="16"/>
-                            <line x1="8" y1="12" x2="16" y2="12"/>
-                        </svg>
-                    </button>
                     <button id="btn-fit-view" class="toolbar-btn" title="Fit to View (F)">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+                        </svg>
+                    </button>
+                    <div class="toolbar-separator"></div>
+                    <button id="btn-profile" class="toolbar-btn" title="Profile & Health Dashboard">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <circle cx="12" cy="10" r="3"/>
+                            <path d="M6.168 18.849A4 4 0 0 1 10 16h4a4 4 0 0 1 3.834 2.855"/>
                         </svg>
                     </button>
                 </div>
@@ -117,8 +108,86 @@
         <div class="main-content">
             <!-- Left Sidebar - Node Library -->
             <div class="sidebar sidebar-left" id="node-library">
-                <div class="sidebar-header">
-                    <h2>Library</h2>
+                <!-- Journals Header -->
+                <div class="sidebar-header" id="journals-header">
+                    <div class="sidebar-title-container">
+                        <svg class="sidebar-icon-main" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"></path>
+                            <path d="M16 2v4M8 2v4M3 10h18"></path>
+                        </svg>
+                        <span class="sidebar-title-text">Journals</span>
+                    </div>
+                    <button class="collapse-btn" id="collapse-journals">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="15 18 9 12 15 6"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Journals Section -->
+                <div class="sidebar-section" id="journals-section" style="display: none;">
+                    <div class="sidebar-content">
+                        <!-- Journal Node Categories - 3 collapsible sections -->
+                        <div class="journal-node-categories" id="journal-node-categories">
+                            <!-- Data (Dates) Category -->
+                            <div class="node-category" data-category="data">
+                                <div class="category-header" data-collapsed="false">
+                                    <span class="category-icon">📅</span>
+                                    <span class="category-title">Data</span>
+                                    <span class="category-badge" id="dates-count">0</span>
+                                    <svg class="collapse-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <polyline points="6 9 12 15 18 9"/>
+                                    </svg>
+                                </div>
+                                <div class="category-nodes" id="journal-dates-list">
+                                    <!-- Dates will be populated by JavaScript -->
+                                </div>
+                            </div>
+
+                            <!-- Mind Inventory Category -->
+                            <div class="node-category" data-category="mindinventory">
+                                <div class="category-header" data-collapsed="false">
+                                    <span class="category-icon">💭</span>
+                                    <span class="category-title">Mind Inventory</span>
+                                    <span class="category-badge">5</span>
+                                    <svg class="collapse-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <polyline points="6 9 12 15 18 9"/>
+                                    </svg>
+                                </div>
+                                <div class="category-nodes" id="journal-mindinventory-nodes">
+                                    <!-- Mind Inventory nodes will be populated by JavaScript -->
+                                </div>
+                            </div>
+
+                            <!-- Perception Graph Category -->
+                            <div class="node-category" data-category="perceptiongraph">
+                                <div class="category-header" data-collapsed="false">
+                                    <span class="category-icon">🧠</span>
+                                    <span class="category-title">Perception Graph</span>
+                                    <span class="category-badge">9</span>
+                                    <svg class="collapse-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <polyline points="6 9 12 15 18 9"/>
+                                    </svg>
+                                </div>
+                                <div class="category-nodes" id="journal-perceptiongraph-nodes">
+                                    <!-- Perception Graph nodes will be populated by JavaScript -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Design Flow Header -->
+                <div class="sidebar-header active" id="design-flow-header">
+                    <div class="sidebar-title-container">
+                        <svg class="sidebar-icon-main" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
+                            <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
+                            <path d="M2 2l7.586 7.586"></path>
+                            <circle cx="11" cy="11" r="2"></circle>
+                        </svg>
+                        <span class="sidebar-title-text">Design Flow</span>
+                    </div>
                     <button class="collapse-btn" id="collapse-library">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="15 18 9 12 15 6"/>
@@ -126,43 +195,68 @@
                     </button>
                 </div>
 
-                <!-- Tabs -->
-                <div class="tabs-container">
-                    <button class="tab-btn active" data-tab="nodes">Nodes</button>
-                    <button class="tab-btn" data-tab="saved">Saved</button>
-                    <button class="tab-btn" data-tab="skills">Skills</button>
-                </div>
-
-                <div class="sidebar-content">
-                    <!-- Nodes Tab -->
-                    <div class="tab-content active" id="tab-nodes">
-                        <input type="text" id="node-search" class="search-input" placeholder="Search nodes...">
-                        <div class="node-categories" id="node-categories">
-                            <!-- Categories will be populated by JavaScript -->
-                        </div>
+                <!-- Design Flow Section -->
+                <div class="sidebar-section" id="design-flow-section">
+                    <!-- Tabs -->
+                    <div class="tabs-container">
+                        <button class="tab-btn active" data-tab="nodes">Nodes</button>
+                        <button class="tab-btn" data-tab="saved">Saved</button>
                     </div>
 
-                    <!-- Saved Tab -->
-                    <div class="tab-content" id="tab-saved">
-                        <div class="workflow-manager">
-                            <button class="btn btn-primary" id="save-workflow-btn">Save Current Workflow</button>
-                            <div id="save-workflow-form" class="hidden" style="margin-top: 12px;">
-                                <input type="text" id="workflow-name-input" class="search-input" placeholder="Workflow name..." style="margin-bottom: 8px;">
-                                <div style="display: flex; gap: 8px;">
-                                    <button class="btn btn-primary" id="confirm-save-btn">Save</button>
-                                    <button class="btn btn-secondary" id="cancel-save-btn">Cancel</button>
+                    <div class="sidebar-content">
+                        <!-- Nodes Tab -->
+                        <div class="tab-content active" id="tab-nodes">
+                            <input type="text" id="node-search" class="search-input" placeholder="Search nodes...">
+                            <div class="node-categories" id="node-categories">
+                                <!-- Categories will be populated by JavaScript -->
+                            </div>
+                        </div>
+
+                        <!-- Saved Tab -->
+                        <div class="tab-content" id="tab-saved">
+                            <div class="workflow-manager">
+                                <div id="save-workflow-form" class="hidden" style="margin-top: 12px;">
+                                    <input type="text" id="workflow-name-input" class="search-input" placeholder="Workflow name..." style="margin-bottom: 8px;">
+                                    <div style="display: flex; gap: 8px;">
+                                        <button class="btn btn-primary" id="confirm-save-btn">Save</button>
+                                        <button class="btn btn-secondary" id="cancel-save-btn">Cancel</button>
+                                    </div>
+                                </div>
+                                <div class="workflow-list" id="workflow-list">
+                                    <!-- Workflow list will be populated by JavaScript -->
                                 </div>
                             </div>
-                            <div class="workflow-list" id="workflow-list">
-                                <!-- Workflow list will be populated by JavaScript -->
-                            </div>
                         </div>
                     </div>
+                </div>
 
-                    <!-- Skills Tab -->
-                    <div class="tab-content" id="tab-skills">
-                        <div class="skills-manager">
-                            <p style="color: #888; padding: 20px; text-align: center;">Skills feature coming soon...</p>
+                <!-- Chat Header -->
+                <div class="sidebar-header" id="chat-header">
+                    <div class="sidebar-title-container">
+                        <svg class="sidebar-icon-main" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                        </svg>
+                        <span class="sidebar-title-text">Chat</span>
+                    </div>
+                    <button class="collapse-btn" id="collapse-chat">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="15 18 9 12 15 6"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Chat Section -->
+                <div class="sidebar-section" id="chat-section" style="display: none;">
+                    <div class="sidebar-content">
+                        <!-- Chat History header -->
+                        <div class="chat-history-header">
+                            <span class="chat-history-title">Chat History</span>
+                        </div>
+                        <!-- Chat History list -->
+                        <div class="chat-history-container">
+                            <div class="chat-history-list" id="chat-history-list">
+                                <!-- Session items rendered by JavaScript -->
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -170,6 +264,7 @@
 
             <!-- Canvas Area -->
             <div class="canvas-container">
+                <div id="canvas-watermark">Design Agent algorithm</div>
                 <canvas id="workflow-canvas"></canvas>
                 <div class="canvas-info">
                     <span id="canvas-coords">X: 0, Y: 0</span>
@@ -195,6 +290,68 @@
                     <div class="context-menu-item" data-action="paste">Paste</div>
                     <div class="context-menu-separator"></div>
                     <div class="context-menu-item" data-action="delete">Delete</div>
+                </div>
+                <!-- Chat Session Context Menu -->
+                <div id="chat-session-context-menu" class="context-menu hidden">
+                    <div class="context-menu-item" data-action="rename-session">Rename</div>
+                    <div class="context-menu-item" data-action="download-session">Download</div>
+                    <div class="context-menu-separator"></div>
+                    <div class="context-menu-item" data-action="delete-session">Delete</div>
+                </div>
+                <!-- Workflow Context Menu -->
+                <div id="workflow-context-menu" class="context-menu hidden">
+                    <div class="context-menu-item" data-action="rename-workflow">Rename</div>
+                    <div class="context-menu-separator"></div>
+                    <div class="context-menu-item" data-action="delete-workflow">Delete</div>
+                </div>
+            </div>
+
+            <!-- Journal View (hidden by default) -->
+            <div class="journal-view-container" id="journal-view-container" style="display: none;">
+                <div class="journal-header">
+                    <div class="journal-header-left">
+                        <button id="back-to-canvas" class="btn-back" title="Back to Workflow">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M19 12H5M12 19l-7-7 7-7"/>
+                            </svg>
+                        </button>
+                        <h1 class="journal-title">Journals</h1>
+                    </div>
+                    <div class="journal-header-right">
+                        <button id="journal-nav-prev" class="journal-nav-btn" title="Previous Day">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="15 18 9 12 15 6"/>
+                            </svg>
+                        </button>
+                        <button id="journal-nav-today" class="journal-nav-btn journal-nav-today" title="Today">Today</button>
+                        <button id="journal-nav-next" class="journal-nav-btn" title="Next Day">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="9 18 15 12 9 6"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="journal-content" id="journal-content">
+                    <!-- Journal pages will be populated by JavaScript -->
+                </div>
+            </div>
+
+            <!-- Node Text Editor (hidden by default, for Journals mode) -->
+            <div class="node-text-editor-container" id="node-text-editor-container" style="display: none;">
+                <div class="text-editor-header">
+                    <button id="back-to-journal-canvas" class="btn-back" title="Back to Canvas">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M19 12H5M12 19l-7-7 7-7"/>
+                        </svg>
+                    </button>
+                    <div class="text-editor-node-info">
+                        <div id="text-editor-lottie" class="text-editor-lottie"></div>
+                        <span id="text-editor-node-type" class="text-editor-node-type"></span>
+                        <span id="text-editor-save-status" class="text-editor-save-status">Saved</span>
+                    </div>
+                </div>
+                <div class="text-editor-content">
+                    <textarea id="node-text-editor" placeholder="Start writing..."></textarea>
                 </div>
             </div>
 
@@ -227,10 +384,15 @@
     <input type="file" id="file-input" accept=".json" style="display: none;">
 
     <!-- Scripts -->
-    <script src="nodes.js?v=20251115d"></script>
-    <script src="canvas.js"></script>
-    <script src="connections.js"></script>
-    <script src="workflow.js"></script>
-    <script src="comfyui.js?v=20251115d"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.12.2/lottie.min.js"></script>
+    <script src="nodes.js?v=20251121"></script>
+    <script src="canvas.js?v=20251122a"></script>
+    <script src="connections.js?v=20251121"></script>
+    <script src="workflow.js?v=20251121"></script>
+    <script src="whoopData.js?v=20251121c"></script>
+    <script src="comfyui.js?v=20251124"></script>
+    <script src="journals.js?v=20251124c"></script>
+    <script src="chat-api.js?v=20251125"></script>
+    <script src="chat.js?v=20251125"></script>
 </body>
 </html>

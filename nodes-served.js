@@ -139,8 +139,7 @@ class Node {
     static fromJSON(data) {
         const node = new Node(data.type, data.x, data.y);
         node.id = data.id;
-        // Deep clone properties to ensure each node has independent data
-        node.properties = data.properties ? JSON.parse(JSON.stringify(data.properties)) : {};
+        node.properties = data.properties || {};
         return node;
     }
 }
@@ -549,63 +548,6 @@ const NodeDefinitions = {
             { name: 'command', type: 'text', default: '' },
             { name: 'output', type: 'text', default: '' }
         ]
-    },
-    'Prompt': {
-        title: 'Prompt',
-        category: 'utility',
-        color: '#f97316',
-        inputs: [
-            { name: 'input', type: DataTypes.ANY }
-        ],
-        outputs: [
-            { name: 'output', type: DataTypes.ANY }
-        ],
-        properties: [
-            { name: 'prompt', type: 'text', default: '' },
-            { name: 'context', type: 'text', default: '' }
-        ]
-    },
-
-    // Chat Node Types (Flux-inspired colors)
-    'SystemMessage': {
-        title: 'System',
-        category: 'chat',
-        color: '#5F8AF7',
-        inputs: [],
-        outputs: [
-            { name: 'output', type: DataTypes.ANY }
-        ],
-        properties: [
-            { name: 'text', type: 'text', default: 'You are a helpful assistant.' }
-        ]
-    },
-    'UserMessage': {
-        title: 'User',
-        category: 'chat',
-        color: '#A9ABAE',
-        inputs: [
-            { name: 'input', type: DataTypes.ANY }
-        ],
-        outputs: [
-            { name: 'output', type: DataTypes.ANY }
-        ],
-        properties: [
-            { name: 'text', type: 'text', default: '' }
-        ]
-    },
-    'GPTMessage': {
-        title: 'Idea',
-        category: 'chat',
-        color: '#619F83',
-        inputs: [
-            { name: 'input', type: DataTypes.ANY }
-        ],
-        outputs: [
-            { name: 'output', type: DataTypes.ANY }
-        ],
-        properties: [
-            { name: 'text', type: 'text', default: '' }
-        ]
     }
 };
 
@@ -615,8 +557,7 @@ const NodeCategories = {
     'perceptiongraph': { title: 'Perception Graph', icon: '🧠' },
     'herojourney': { title: 'Hero Journey', icon: '⚔️' },
     'social': { title: 'Social', icon: '👥' },
-    'utility': { title: 'Utility', icon: '🛠️' },
-    'chat': { title: 'Chat', icon: '💬' }
+    'utility': { title: 'Utility', icon: '🛠️' }
 };
 
 // Get all nodes by category

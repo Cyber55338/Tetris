@@ -51,12 +51,20 @@ class ConnectionManager {
             return null;
         }
 
-        // Check if input already has a connection (inputs can only have one connection)
+        // Determine if multiple connections are allowed on this input
+        // - Journals mode: all nodes can have multiple input connections
+        // - Design Flow: utility nodes as SOURCE don't break existing connections
+        const isJournalMode = typeof journalMode !== 'undefined' && journalMode;
+        const isUtilityNode = outputNode.category === 'utility';
+        const allowMultiple = isJournalMode || isUtilityNode;
+
+        // Check if input already has a connection
         const existingConnection = this.connections.find(conn =>
             conn.inputNode === inputNode && conn.inputIndex === inputIndex
         );
 
-        if (existingConnection) {
+        // Only remove existing connection if multiple connections NOT allowed
+        if (existingConnection && !allowMultiple) {
             this.removeConnection(existingConnection);
         }
 
@@ -64,8 +72,12 @@ class ConnectionManager {
         const connection = new Connection(outputNode, outputIndex, inputNode, inputIndex);
         this.connections.push(connection);
 
-        // Update node port states
-        inputPort.connection = connection;
+        // Update node port states - support multiple connections
+        if (!inputPort.connections) {
+            inputPort.connections = [];
+        }
+        inputPort.connections.push(connection);
+        inputPort.connection = connection; // Keep for backwards compatibility
         outputPort.connections.push(connection);
 
         return connection;
@@ -80,7 +92,17 @@ class ConnectionManager {
             const outputPort = connection.outputNode.outputs[connection.outputIndex];
 
             if (inputPort) {
-                inputPort.connection = null;
+                // Remove from connections array if it exists
+                if (inputPort.connections) {
+                    const connIndex = inputPort.connections.indexOf(connection);
+                    if (connIndex > -1) {
+                        inputPort.connections.splice(connIndex, 1);
+                    }
+                }
+                // Update single connection reference for backwards compatibility
+                if (inputPort.connection === connection) {
+                    inputPort.connection = inputPort.connections?.[0] || null;
+                }
             }
 
             if (outputPort) {
@@ -161,19 +183,43 @@ class ConnectionManager {
 
     // Render all connections
     render(ctx) {
+        const inChatMode = typeof isChatMode === 'function' && isChatMode();
+
         this.connections.forEach(conn => {
-            const start = conn.outputNode.getOutputPosition(conn.outputIndex);
-            const end = conn.inputNode.getInputPosition(conn.inputIndex);
+            // Check if this is a chat connection
+            const isChatConnection = inChatMode &&
+                ['SystemMessage', 'UserMessage', 'GPTMessage'].includes(conn.outputNode.type) &&
+                ['SystemMessage', 'UserMessage', 'GPTMessage'].includes(conn.inputNode.type);
 
-            // Get color from output type
-            const outputType = conn.outputNode.outputs[conn.outputIndex].type;
-            const color = outputType.color;
+            if (isChatConnection) {
+                // Vertical connection (bottom of parent to top of child)
+                const start = {
+                    x: conn.outputNode.x + conn.outputNode.width / 2,
+                    y: conn.outputNode.y + conn.outputNode.height
+                };
+                const end = {
+                    x: conn.inputNode.x + conn.inputNode.width / 2,
+                    y: conn.inputNode.y
+                };
 
-            this.drawConnection(ctx, start, end, color);
+                // Use output node color for connection
+                const color = conn.outputNode.color || '#5a9fd4';
+                this.drawVerticalConnection(ctx, start, end, color);
+            } else {
+                // Standard horizontal connection
+                const start = conn.outputNode.getOutputPosition(conn.outputIndex);
+                const end = conn.inputNode.getInputPosition(conn.inputIndex);
+
+                // Get color from output type
+                const outputType = conn.outputNode.outputs[conn.outputIndex].type;
+                const color = outputType.color;
+
+                this.drawConnection(ctx, start, end, color);
+            }
         });
     }
 
-    // Draw a connection curve
+    // Draw a horizontal connection curve (original style)
     drawConnection(ctx, start, end, color = '#5a9fd4', dashed = false) {
         const dx = end.x - start.x;
         const controlPointOffset = Math.abs(dx) * 0.5;
@@ -202,6 +248,32 @@ class ConnectionManager {
         ctx.shadowColor = 'transparent';
         ctx.shadowBlur = 0;
         ctx.setLineDash([]);
+    }
+
+    // Draw a vertical connection curve (Flux-style for chat nodes)
+    drawVerticalConnection(ctx, start, end, color = '#5a9fd4') {
+        const dy = end.y - start.y;
+        const controlPointOffset = Math.abs(dy) * 0.5;
+
+        // Subtle shadow
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 3;
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.bezierCurveTo(
+            start.x, start.y + controlPointOffset,  // Control point 1 (below start)
+            end.x, end.y - controlPointOffset,      // Control point 2 (above end)
+            end.x, end.y
+        );
+        ctx.stroke();
+
+        // Reset
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
     }
 
     // Get all connections as JSON

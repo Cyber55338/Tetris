@@ -17,14 +17,29 @@ class ComfyUIApp {
         this.draggedNode = null;
         this.dragOffsetX = 0;
         this.dragOffsetY = 0;
+        this.dragOffsets = null; // Map of node -> {x, y} offsets for multi-select drag
         this.isPanning = false;
         this.panStartX = 0;
         this.panStartY = 0;
         this.isConnecting = false;
         this.connectionStartPort = null;
 
+        // Marquee selection state
+        this.isMarqueeSelecting = false;
+        this.marqueeStartX = 0;
+        this.marqueeStartY = 0;
+        this.marqueeEndX = 0;
+        this.marqueeEndY = 0;
+        this.marqueeThreshold = 5; // pixels before marquee activates
+        this.potentialMarquee = false; // true when mousedown on empty, waiting for drag
+
         // Clipboard
         this.clipboard = null;
+
+        // Whoop Health Dashboard
+        this.whoopData = whoopDataManager;
+        this.isWhoopViewActive = false;
+        this.originalPropertiesContent = null;
 
         // Initialize
         this.initializeUI();
@@ -60,12 +75,19 @@ class ComfyUIApp {
     setupEventListeners() {
         // Toolbar buttons
         document.getElementById('btn-new').addEventListener('click', () => {
+            // In chat mode, this is handled by chat.js
+            if (typeof isChatMode === 'function' && isChatMode()) return;
             this.workflowManager.newWorkflow();
             this.updateNodeCount();
         });
 
         document.getElementById('btn-save').addEventListener('click', () => {
-            this.workflowManager.saveWorkflow();
+            // Show save workflow form (only in Design Flow mode)
+            if (typeof chatMode === 'undefined' || !chatMode) {
+                if (typeof journalMode === 'undefined' || !journalMode) {
+                    document.getElementById('save-workflow-form').classList.remove('hidden');
+                }
+            }
         });
 
         document.getElementById('btn-load').addEventListener('click', () => {
@@ -114,12 +136,17 @@ class ComfyUIApp {
             this.canvasRenderer.zoomOut(centerX, centerY);
         });
 
-        document.getElementById('btn-zoom-reset').addEventListener('click', () => {
-            this.canvasRenderer.resetZoom();
-        });
-
         document.getElementById('btn-fit-view').addEventListener('click', () => {
             this.canvasRenderer.fitToView();
+        });
+
+        // Profile button
+        document.getElementById('btn-profile').addEventListener('click', () => {
+            if (this.isWhoopViewActive) {
+                this.hideWhoopDashboard();
+            } else {
+                this.showWhoopDashboard();
+            }
         });
 
         // Minimap toggle
@@ -163,19 +190,78 @@ class ComfyUIApp {
             this.filterNodes(e.target.value);
         });
 
-        // Sidebar collapse buttons
-        document.getElementById('collapse-library').addEventListener('click', () => {
-            document.getElementById('node-library').classList.toggle('collapsed');
-        });
+        // Sidebar collapse buttons (library & properties) with better UX and ARIA state
+        const libraryPanel = document.getElementById('node-library');
+        const libraryToggle = document.getElementById('collapse-library');
+        const journalsToggle = document.getElementById('collapse-journals'); // Journals arrow button
+        const propertiesPanel = document.getElementById('properties-panel');
+        const propertiesToggle = document.getElementById('collapse-properties');
 
-        document.getElementById('collapse-properties').addEventListener('click', () => {
-            document.getElementById('properties-panel').classList.toggle('collapsed');
-        });
+        const bindSidebarToggle = (panel, toggleBtn) => {
+            if (!panel || !toggleBtn) return;
+
+            const updateAria = () => {
+                const isCollapsed = panel.classList.contains('collapsed');
+                toggleBtn.setAttribute('aria-expanded', (!isCollapsed).toString());
+            };
+
+            const handleToggle = () => {
+                panel.classList.toggle('collapsed');
+                updateAria();
+                // When sidebars resize, also resize the canvas so it fills the new space
+                if (this.canvasRenderer) {
+                    this.canvasRenderer.resizeCanvas();
+                }
+            };
+
+            // Button click toggles collapsed state
+            toggleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                handleToggle();
+            });
+
+            // Make entire header clickable ONLY for properties panel (right sidebar)
+            // Left sidebar (node-library) uses Journals/Design Flow navigation in journals.js
+            if (panel.id === 'properties-panel') {
+                const header = panel.querySelector('.sidebar-header');
+                if (header) {
+                    header.addEventListener('click', (e) => {
+                        if (e.target.closest('.collapse-btn')) return;
+                        handleToggle();
+                    });
+                }
+            }
+
+            // Initialize ARIA state
+            updateAria();
+        };
+
+        bindSidebarToggle(libraryPanel, libraryToggle);
+        bindSidebarToggle(libraryPanel, journalsToggle); // Both arrows control the same sidebar
+        bindSidebarToggle(propertiesPanel, propertiesToggle);
 
         // Context menu
         document.addEventListener('click', () => {
             this.hideContextMenu();
+            this.hideWorkflowContextMenu();
         });
+
+        // Workflow context menu actions
+        const workflowContextMenu = document.getElementById('workflow-context-menu');
+        if (workflowContextMenu) {
+            workflowContextMenu.addEventListener('click', (e) => {
+                const action = e.target.dataset.action;
+                if (!this.contextMenuWorkflowId) return;
+
+                if (action === 'rename-workflow') {
+                    this.renameSavedWorkflow(this.contextMenuWorkflowId);
+                } else if (action === 'delete-workflow') {
+                    this.deleteSavedWorkflow(this.contextMenuWorkflowId);
+                }
+
+                this.hideWorkflowContextMenu();
+            });
+        }
 
         // Window resize
         window.addEventListener('resize', () => {
@@ -191,10 +277,6 @@ class ComfyUIApp {
         });
 
         // Workflow manager
-        document.getElementById('save-workflow-btn').addEventListener('click', () => {
-            document.getElementById('save-workflow-form').classList.remove('hidden');
-        });
-
         document.getElementById('confirm-save-btn').addEventListener('click', () => {
             const name = document.getElementById('workflow-name-input').value.trim();
             if (name) {
@@ -264,25 +346,59 @@ class ComfyUIApp {
             this.dragOffsetX = canvasPos.x - clickedNode2.x;
             this.dragOffsetY = canvasPos.y - clickedNode2.y;
 
-            // Select node
-            if (!e.ctrlKey && !e.metaKey) {
-                this.canvasRenderer.selectNode(clickedNode2, false);
+            // Check if clicked node is already selected (for multi-drag)
+            const selectedNodes = this.canvasRenderer.selectedNodes;
+            const isAlreadySelected = selectedNodes.includes(clickedNode2);
+
+            // Only change selection if NOT clicking an already-selected node
+            if (!isAlreadySelected) {
+                if (!e.ctrlKey && !e.metaKey) {
+                    this.canvasRenderer.selectNode(clickedNode2, false);
+                } else {
+                    this.canvasRenderer.selectNode(clickedNode2, true);
+                }
+            }
+
+            // Store offsets for ALL selected nodes (for group drag)
+            this.dragOffsets = new Map();
+            const currentSelected = this.canvasRenderer.selectedNodes;
+
+            // If clicked node is part of selection, drag all selected nodes together
+            if (currentSelected.includes(clickedNode2)) {
+                for (const node of currentSelected) {
+                    this.dragOffsets.set(node, {
+                        x: canvasPos.x - node.x,
+                        y: canvasPos.y - node.y
+                    });
+                }
             } else {
-                this.canvasRenderer.selectNode(clickedNode2, true);
+                // Clicked unselected node - just drag that one
+                this.dragOffsets.set(clickedNode2, {
+                    x: canvasPos.x - clickedNode2.x,
+                    y: canvasPos.y - clickedNode2.y
+                });
             }
 
             this.updatePropertiesPanel(clickedNode2);
+
+            // Notify chat mode of selection
+            if (typeof onChatNodeSelected === 'function') {
+                onChatNodeSelected(clickedNode2);
+            }
         } else {
-            // Start panning
-            if (e.button === 0 || e.button === 1) { // Left or middle button
+            // Empty canvas click
+            if (e.button === 0) { // Left click - prepare for marquee
+                this.potentialMarquee = true;
+                this.marqueeStartX = screenX;
+                this.marqueeStartY = screenY;
+                // Deselect all
+                this.canvasRenderer.deselectAll();
+                this.updatePropertiesPanel(null);
+            } else if (e.button === 1) { // Middle button - pan only
                 this.isPanning = true;
                 this.panStartX = e.clientX;
                 this.panStartY = e.clientY;
                 this.canvas.classList.add('dragging');
-
-                // Deselect all
-                this.canvasRenderer.deselectAll();
-                this.updatePropertiesPanel(null);
             }
         }
     }
@@ -293,14 +409,19 @@ class ComfyUIApp {
         const screenY = e.clientY - rect.top;
         const canvasPos = this.canvasRenderer.screenToCanvas(screenX, screenY);
 
+        // Track last pointer position in canvas space for paste placement fallback
+        this.lastPointerCanvasPos = canvasPos;
+
         // Update canvas coordinates display
         document.getElementById('canvas-coords').textContent =
             `X: ${Math.round(canvasPos.x)}, Y: ${Math.round(canvasPos.y)}`;
 
-        if (this.isDraggingNode && this.draggedNode) {
-            // Drag node
-            this.draggedNode.x = canvasPos.x - this.dragOffsetX;
-            this.draggedNode.y = canvasPos.y - this.dragOffsetY;
+        if (this.isDraggingNode && this.dragOffsets) {
+            // Drag all selected nodes together
+            for (const [node, offset] of this.dragOffsets) {
+                node.x = canvasPos.x - offset.x;
+                node.y = canvasPos.y - offset.y;
+            }
             this.canvasRenderer.render();
             this.workflowManager.markDirty();
         } else if (this.isPanning) {
@@ -313,6 +434,32 @@ class ComfyUIApp {
         } else if (this.isConnecting) {
             // Update temporary connection
             this.canvasRenderer.tempConnectionEnd = { x: canvasPos.x, y: canvasPos.y };
+            this.canvasRenderer.render();
+        } else if (this.potentialMarquee) {
+            // Check if moved enough to start marquee
+            const dx = screenX - this.marqueeStartX;
+            const dy = screenY - this.marqueeStartY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            if (distance > this.marqueeThreshold) {
+                this.isMarqueeSelecting = true;
+                this.potentialMarquee = false;
+                this.marqueeEndX = screenX;
+                this.marqueeEndY = screenY;
+                this.canvasRenderer.setMarquee(
+                    this.marqueeStartX, this.marqueeStartY,
+                    this.marqueeEndX, this.marqueeEndY
+                );
+                this.canvasRenderer.render();
+            }
+        } else if (this.isMarqueeSelecting) {
+            // Update marquee end position
+            this.marqueeEndX = screenX;
+            this.marqueeEndY = screenY;
+            this.canvasRenderer.setMarquee(
+                this.marqueeStartX, this.marqueeStartY,
+                this.marqueeEndX, this.marqueeEndY
+            );
             this.canvasRenderer.render();
         } else {
             // Update hover state
@@ -346,23 +493,50 @@ class ComfyUIApp {
             const screenY = e.clientY - rect.top;
             const canvasPos = this.canvasRenderer.screenToCanvas(screenX, screenY);
 
-            // Find target port
+            // Find target - first try specific port, then fall back to node
+            let targetNode = null;
+            let targetPortIndex = null;
+
+            // First: Try to find exact port (existing precise behavior)
             for (const node of this.canvasRenderer.nodes) {
                 const port = node.getPortAtPosition(canvasPos.x, canvasPos.y);
                 if (port && port.type === 'input') {
-                    // Create connection
-                    if (this.connectionManager.canConnect(this.connectionStartPort, port)) {
-                        this.connectionManager.addConnection(
-                            this.connectionStartPort.node,
-                            this.connectionStartPort.index,
-                            node,
-                            port.index
-                        );
-                        this.workflowManager.markDirty();
-                    } else {
-                        this.workflowManager.showNotification('Incompatible port types', 'error');
-                    }
+                    targetNode = node;
+                    targetPortIndex = port.index;
                     break;
+                }
+            }
+
+            // Second: If no port found, check if over any node (auto-connect fallback)
+            if (!targetNode) {
+                for (const node of this.canvasRenderer.nodes) {
+                    if (node.containsPoint(canvasPos.x, canvasPos.y)) {
+                        // Skip the source node (can't connect to self)
+                        if (node === this.connectionStartPort.node) continue;
+
+                        // Find first available input port
+                        if (node.inputs && node.inputs.length > 0) {
+                            targetNode = node;
+                            targetPortIndex = 0; // First input port
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Create connection if we found a valid target
+            if (targetNode && targetPortIndex !== null) {
+                const targetPort = { index: targetPortIndex, port: targetNode.inputs[targetPortIndex] };
+                if (this.connectionManager.canConnect(this.connectionStartPort, targetPort)) {
+                    this.connectionManager.addConnection(
+                        this.connectionStartPort.node,
+                        this.connectionStartPort.index,
+                        targetNode,
+                        targetPortIndex
+                    );
+                    this.workflowManager.markDirty();
+                } else {
+                    this.workflowManager.showNotification('Incompatible port types', 'error');
                 }
             }
 
@@ -374,8 +548,24 @@ class ComfyUIApp {
             this.canvasRenderer.render();
         }
 
+        // Handle marquee selection completion
+        if (this.isMarqueeSelecting) {
+            const rect = this.canvasRenderer.getMarqueeBounds();
+            const nodesInRect = this.canvasRenderer.getNodesInRect(rect);
+            nodesInRect.forEach(node => {
+                this.canvasRenderer.selectNode(node, true); // multi-select
+            });
+
+            this.isMarqueeSelecting = false;
+            this.canvasRenderer.clearMarquee();
+            this.canvasRenderer.render();
+        }
+
+        // Reset all states
+        this.potentialMarquee = false;
         this.isDraggingNode = false;
         this.draggedNode = null;
+        this.dragOffsets = null;
         this.isPanning = false;
         this.canvas.classList.remove('dragging');
     }
@@ -383,24 +573,34 @@ class ComfyUIApp {
     onCanvasWheel(e) {
         e.preventDefault();
 
-        const rect = this.canvas.getBoundingClientRect();
-        const centerX = e.clientX - rect.left;
-        const centerY = e.clientY - rect.top;
+        // Ctrl+wheel = zoom (pinch gesture on trackpad)
+        if (e.ctrlKey) {
+            const rect = this.canvas.getBoundingClientRect();
+            const centerX = e.clientX - rect.left;
+            const centerY = e.clientY - rect.top;
 
-        if (e.deltaY < 0) {
-            this.canvasRenderer.zoomIn(centerX, centerY);
+            if (e.deltaY < 0) {
+                this.canvasRenderer.zoomIn(centerX, centerY);
+            } else {
+                this.canvasRenderer.zoomOut(centerX, centerY);
+            }
         } else {
-            this.canvasRenderer.zoomOut(centerX, centerY);
+            // Regular scroll = pan (two-finger drag on trackpad)
+            this.canvasRenderer.pan(-e.deltaX, -e.deltaY);
         }
     }
 
     onCanvasContextMenu(e) {
         e.preventDefault();
 
+        // Track where the context menu was opened in canvas coordinates (for paste placement)
         const rect = this.canvas.getBoundingClientRect();
         const screenX = e.clientX - rect.left;
         const screenY = e.clientY - rect.top;
+        const canvasPos = this.canvasRenderer.screenToCanvas(screenX, screenY);
+        this.lastContextMenuCanvasPos = canvasPos;
 
+        // Position context menu at cursor (viewport coordinates for position: fixed)
         this.showContextMenu(e.clientX, e.clientY);
     }
 
@@ -409,6 +609,13 @@ class ComfyUIApp {
         const screenX = e.clientX - rect.left;
         const screenY = e.clientY - rect.top;
         const canvasPos = this.canvasRenderer.screenToCanvas(screenX, screenY);
+
+        // Check if double-clicked on a node in Journals mode
+        const clickedNode = this.canvasRenderer.getNodeAtPosition(canvasPos.x, canvasPos.y);
+        if (clickedNode && typeof isJournalMode === 'function' && isJournalMode()) {
+            this.openNodeTextEditor(clickedNode);
+            return;
+        }
 
         // Check if double-clicked on a connection
         const connection = this.connectionManager.getConnectionAtPosition(canvasPos.x, canvasPos.y, 10);
@@ -420,12 +627,33 @@ class ComfyUIApp {
         }
     }
 
+    // Helper: Check if user is editing text or has text selected
+    isUserEditingText() {
+        // Check 1: Is focus on a text input element?
+        const activeEl = document.activeElement;
+        const isFocusedOnTextInput = activeEl && (
+            activeEl.tagName === 'INPUT' ||
+            activeEl.tagName === 'TEXTAREA' ||
+            activeEl.tagName === 'SELECT' ||
+            activeEl.isContentEditable
+        );
+
+        if (isFocusedOnTextInput) {
+            return true;
+        }
+
+        // Check 2: Is there an active text selection anywhere?
+        const selection = window.getSelection();
+        if (selection && selection.toString().length > 0) {
+            return true;
+        }
+
+        return false;
+    }
+
     onKeyDown(e) {
-        // Check if user is typing in an input field
-        const isTyping = document.activeElement &&
-                        (document.activeElement.tagName === 'INPUT' ||
-                         document.activeElement.tagName === 'TEXTAREA' ||
-                         document.activeElement.tagName === 'SELECT');
+        // Check if user is editing text (for non-Ctrl shortcuts like Delete)
+        const isTyping = this.isUserEditingText();
 
         // Delete key
         if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -441,6 +669,12 @@ class ComfyUIApp {
 
         // Ctrl/Cmd shortcuts
         if (e.ctrlKey || e.metaKey) {
+            // Skip node shortcuts if user is editing text or has text selected
+            if (this.isUserEditingText()) {
+                // Allow default browser copy/paste behavior for text
+                return;
+            }
+
             switch (e.key) {
                 case 's':
                     e.preventDefault();
@@ -497,7 +731,7 @@ class ComfyUIApp {
         }
 
         // Fit to view
-        if (e.key === 'f' || e.key === 'F') {
+        if ((e.key === 'f' || e.key === 'F') && !isTyping) {
             e.preventDefault();
             this.canvasRenderer.fitToView();
         }
@@ -604,6 +838,12 @@ class ComfyUIApp {
         this.canvasRenderer.addNode(node);
         this.updateNodeCount();
         this.workflowManager.markDirty();
+
+        // Auto-save if in journal mode
+        if (typeof isJournalMode === 'function' && isJournalMode()) {
+            saveCurrentJournalCanvas();
+        }
+
         return node;
     }
 
@@ -618,6 +858,11 @@ class ComfyUIApp {
     }
 
     updatePropertiesPanel(node) {
+        // Skip if chat mode is active (chat panel handles its own UI)
+        if (typeof isChatMode === 'function' && isChatMode()) {
+            return;
+        }
+
         const container = document.getElementById('properties-content');
 
         if (!node) {
@@ -720,6 +965,11 @@ class ComfyUIApp {
             Object.entries(node.properties).forEach(([key, value]) => {
                 const definition = NodeDefinitions[node.type];
                 const propDef = definition?.properties?.find(p => p.name === key);
+
+                // In Journal mode, skip dataSource property entirely
+                if (key === 'dataSource' && typeof isJournalMode === 'function' && isJournalMode()) {
+                    return; // Skip this property
+                }
 
                 // Format camelCase to Title Case (e.g., "dataSource" -> "Data source")
                 let formattedLabel;
@@ -824,9 +1074,24 @@ class ComfyUIApp {
 
     showContextMenu(x, y) {
         const menu = document.getElementById('context-menu');
-        menu.style.left = x + 'px';
-        menu.style.top = y + 'px';
+
+        // Show menu so we can measure its size
         menu.classList.remove('hidden');
+
+        const menuRect = menu.getBoundingClientRect();
+        const menuWidth = menuRect.width;
+        const menuHeight = menuRect.height;
+
+        // Clamp position so the menu stays fully inside the viewport (for position: fixed)
+        const padding = 4;
+        const maxX = window.innerWidth - menuWidth - padding;
+        const maxY = window.innerHeight - menuHeight - padding;
+
+        const clampedX = Math.max(padding, Math.min(x, maxX));
+        const clampedY = Math.max(padding, Math.min(y, maxY));
+
+        menu.style.left = clampedX + 'px';
+        menu.style.top = clampedY + 'px';
 
         // Add event listeners
         menu.querySelectorAll('.context-menu-item').forEach(item => {
@@ -864,12 +1129,25 @@ class ComfyUIApp {
     copySelected() {
         if (this.canvasRenderer.selectedNodes.length === 0) return;
 
+        const selected = this.canvasRenderer.selectedNodes;
+
+        // Compute center of copied selection in canvas space
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        selected.forEach(node => {
+            minX = Math.min(minX, node.x);
+            minY = Math.min(minY, node.y);
+            maxX = Math.max(maxX, node.x);
+            maxY = Math.max(maxY, node.y);
+        });
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+
         this.clipboard = {
-            nodes: this.canvasRenderer.selectedNodes.map(n => n.toJSON()),
+            nodes: selected.map(n => n.toJSON()),
             connections: this.connectionManager.connections
-                .filter(c => this.canvasRenderer.selectedNodes.includes(c.outputNode) &&
-                           this.canvasRenderer.selectedNodes.includes(c.inputNode))
-                .map(c => c.toJSON())
+                .filter(c => selected.includes(c.outputNode) && selected.includes(c.inputNode))
+                .map(c => c.toJSON()),
+            center: { x: centerX, y: centerY }
         };
 
         this.workflowManager.showNotification(`Copied ${this.clipboard.nodes.length} node(s)`, 'info');
@@ -878,19 +1156,38 @@ class ComfyUIApp {
     paste() {
         if (!this.clipboard || this.clipboard.nodes.length === 0) return;
 
-        const offset = 50;
         const nodeIdMap = new Map();
 
-        // Paste nodes
+        // Determine target position for paste
+        let targetPos = null;
+        if (this.lastContextMenuCanvasPos) {
+            targetPos = this.lastContextMenuCanvasPos;
+        } else if (this.lastPointerCanvasPos) {
+            targetPos = this.lastPointerCanvasPos;
+        } else {
+            // Fallback to canvas center in world space
+            const centerX = -this.canvasRenderer.offsetX / this.canvasRenderer.scale + this.canvas.width / 2 / this.canvasRenderer.scale;
+            const centerY = -this.canvasRenderer.offsetY / this.canvasRenderer.scale + this.canvas.height / 2 / this.canvasRenderer.scale;
+            targetPos = { x: centerX, y: centerY };
+        }
+
+        const sourceCenter = this.clipboard.center || { x: targetPos.x, y: targetPos.y };
+        const dx = targetPos.x - sourceCenter.x;
+        const dy = targetPos.y - sourceCenter.y;
+
+        // Paste nodes, preserving relative layout but moving them so their center is at targetPos
         this.clipboard.nodes.forEach(nodeData => {
             const newNode = Node.fromJSON(nodeData);
             newNode.id = `node_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            newNode.x += offset;
-            newNode.y += offset;
+            newNode.x += dx;
+            newNode.y += dy;
 
             nodeIdMap.set(nodeData.id, newNode);
             this.canvasRenderer.addNode(newNode);
         });
+
+        // After first paste, clear the context menu anchor so Ctrl+V uses pointer/center next time
+        this.lastContextMenuCanvasPos = null;
 
         // Paste connections
         this.clipboard.connections.forEach(connData => {
@@ -993,40 +1290,22 @@ class ComfyUIApp {
 
             return `
                 <div class="workflow-item" data-id="${wf.id}">
-                    <div class="workflow-item-header">
-                        <div class="workflow-item-name">${wf.name}</div>
-                    </div>
-                    <div class="workflow-item-meta">
-                        ${nodeCount} nodes • ${dateStr}
-                    </div>
-                    <div class="workflow-item-actions">
-                        <button class="btn btn-primary btn-small load-workflow-btn" data-id="${wf.id}">Load</button>
-                        <button class="btn btn-secondary btn-small rename-workflow-btn" data-id="${wf.id}">Rename</button>
-                        <button class="btn btn-danger btn-small delete-workflow-btn" data-id="${wf.id}">Delete</button>
-                    </div>
+                    <span class="workflow-item-name">${wf.name}</span>
+                    <span class="workflow-item-meta">${nodeCount} nodes • ${dateStr}</span>
                 </div>
             `;
         }).join('');
 
         // Add event listeners
-        container.querySelectorAll('.load-workflow-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const id = e.target.dataset.id;
-                this.loadSavedWorkflow(id);
+        container.querySelectorAll('.workflow-item').forEach(item => {
+            // Left-click to load workflow
+            item.addEventListener('click', () => {
+                this.loadSavedWorkflow(item.dataset.id);
             });
-        });
-
-        container.querySelectorAll('.delete-workflow-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const id = e.target.dataset.id;
-                this.deleteSavedWorkflow(id);
-            });
-        });
-
-        container.querySelectorAll('.rename-workflow-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const id = e.target.dataset.id;
-                this.renameSavedWorkflow(id);
+            // Right-click for context menu
+            item.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                this.showWorkflowContextMenu(e, item.dataset.id);
             });
         });
     }
@@ -1069,6 +1348,24 @@ class ComfyUIApp {
                 this.workflowManager.showNotification('Workflow renamed', 'success');
             }
         }
+    }
+
+    // Show workflow context menu
+    showWorkflowContextMenu(e, workflowId) {
+        const menu = document.getElementById('workflow-context-menu');
+        if (!menu) return;
+
+        this.contextMenuWorkflowId = workflowId;
+        menu.style.left = e.clientX + 'px';
+        menu.style.top = e.clientY + 'px';
+        menu.classList.remove('hidden');
+    }
+
+    // Hide workflow context menu
+    hideWorkflowContextMenu() {
+        const menu = document.getElementById('workflow-context-menu');
+        if (menu) menu.classList.add('hidden');
+        this.contextMenuWorkflowId = null;
     }
 
     // Show smartwatch simulator in properties panel
@@ -1465,6 +1762,820 @@ Return ONLY the prompt text, no other formatting or explanation.`;
 
         // Trigger the file picker
         fileInput.click();
+    }
+
+    // ==================== WHOOP HEALTH DASHBOARD METHODS ====================
+
+    // Show Whoop dashboard in properties panel
+    showWhoopDashboard() {
+        const propertiesContent = document.getElementById('properties-content');
+
+        // Store original content if not already stored
+        if (!this.isWhoopViewActive) {
+            this.originalPropertiesContent = propertiesContent.innerHTML;
+        }
+
+        this.isWhoopViewActive = true;
+
+        // Generate Whoop UI
+        propertiesContent.innerHTML = this.generateWhoopUI();
+
+        // Attach event listeners
+        this.attachWhoopEventListeners();
+    }
+
+    // Hide Whoop dashboard and restore properties panel
+    hideWhoopDashboard() {
+        const propertiesContent = document.getElementById('properties-content');
+        if (this.originalPropertiesContent) {
+            propertiesContent.innerHTML = this.originalPropertiesContent;
+        }
+        this.isWhoopViewActive = false;
+    }
+
+    // Generate complete Whoop UI HTML
+    generateWhoopUI() {
+        return `
+            <div class="whoop-container">
+                <!-- Custom Header Bar (redesign) -->
+                <div class="whoop-custom-header">
+                    <!-- Left: Profile + Flame -->
+                    <div class="header-left">
+                        <div class="profile-icon-small" id="header-profile">
+                            <img src="https://images.unsplash.com/photo-1568602471122-7832951cc4c5?ixlib=rb-1.2.1&auto=format&fit=crop&w=100&q=80" alt="Profile">
+                        </div>
+                        <div class="flame-badge">
+                            <svg class="flame-icon" viewBox="0 0 24 24">
+                                <path fill="url(#flameGradient)" d="M13.5 3C13.5 3 17 6 17 10C17 13.5 14.5 16 12 16C12 16 14.5 13.5 14.5 11C14.5 11 11.5 12.5 11.5 15C11.5 17 12.5 17.5 13 17.5C12 20 9 21 7.5 21C5.5 21 4 19 4 16C4 11 8 7.5 13.5 3Z" />
+                                <path fill="url(#flameGradientInner)" d="M12 23a7.5 7.5 0 0 1-5.138-12.963C8.202 8.726 12 3 12 3s3.798 5.726 5.138 7.037A7.5 7.5 0 0 1 12 23z"/>
+                                <defs>
+                                    <linearGradient id="flameGradient" x1="0%" y1="100%" x2="0%" y2="0%">
+                                        <stop offset="0%" style="stop-color:#FF4D4D;stop-opacity:1" />
+                                        <stop offset="100%" style="stop-color:#FF9E4D;stop-opacity:1" />
+                                    </linearGradient>
+                                    <linearGradient id="flameGradientInner" x1="0%" y1="100%" x2="0%" y2="0%">
+                                        <stop offset="0%" style="stop-color:#FF2D2D;stop-opacity:1" />
+                                        <stop offset="100%" style="stop-color:#FF8E2D;stop-opacity:1" />
+                                    </linearGradient>
+                                </defs>
+                            </svg>
+                            <span class="flame-count">128</span>
+                        </div>
+                    </div>
+
+                    <!-- Center: Navigation -->
+                    <div class="header-center">
+                        <div class="nav-pill-container">
+                            <button class="nav-arrow" id="header-prev">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                            </button>
+                            <button class="today-pill-btn" id="toggle-calendar">TODAY</button>
+                            <button class="nav-arrow" id="header-next">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Right: Battery + Watch -->
+                    <div class="header-right">
+                        <span class="percent-text">89%</span>
+                        <div class="watch-status-icon">
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="6" y="4" width="12" height="16" rx="4" ry="4"></rect>
+                                <line x1="6" y1="12" x2="18" y2="12"></line>
+                                <circle cx="18" cy="6" r="2" fill="#00d26a" stroke="none"></circle>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Navigation tabs (Calendar and Profile removed) -->
+                <div class="whoop-nav">
+                    <button class="whoop-nav-btn active" data-view="today">Today</button>
+                    <button class="whoop-nav-btn" data-view="sleep">Analytics</button>
+                    <button class="whoop-nav-btn" data-view="strain">Multiplayer</button>
+                </div>
+
+                <!-- View container -->
+                <div class="whoop-view-container" id="whoop-view">
+                    ${this.generateTodayView()}
+                </div>
+
+                <!-- Calendar Popup Overlay (hidden by default) -->
+                <div class="calendar-popup-overlay hidden" id="calendar-overlay">
+                    ${this.generateCalendarPopup()}
+                </div>
+
+                <!-- Profile Popup Overlay (hidden by default) -->
+                <div class="profile-popup-overlay hidden" id="profile-overlay">
+                    ${this.generateProfilePopup()}
+                </div>
+
+                <!-- Close button -->
+                <button class="whoop-close-btn" id="close-whoop">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                    Close
+                </button>
+            </div>
+        `;
+    }
+
+    // Generate Today View (Dashboard)
+    generateTodayView() {
+        const data = this.whoopData.todayMetrics;
+        const recoveryColor = this.getRecoveryColor(data.recovery);
+        const strainGradient = this.getStrainGradient(data.strain);
+
+        return `
+            <div class="whoop-today-view">
+                <!-- Recovery Circle -->
+                <div class="recovery-circle">
+                    <svg width="180" height="180">
+                        <circle cx="90" cy="90" r="75" fill="none" stroke="#2a2a2a" stroke-width="12"/>
+                        <circle cx="90" cy="90" r="75" fill="none" stroke="${recoveryColor}"
+                                stroke-width="12" stroke-dasharray="471"
+                                stroke-dashoffset="${471 - (471 * data.recovery / 100)}"
+                                stroke-linecap="round"/>
+                    </svg>
+                    <div class="recovery-score-text">
+                        <div class="recovery-score-value" style="color: ${recoveryColor};">${data.recovery}%</div>
+                        <div class="recovery-score-label">Creativity</div>
+                    </div>
+                </div>
+
+                <!-- Today's Stats -->
+                <div class="whoop-metric-card">
+                    <div class="whoop-metric-header">
+                        <span class="whoop-metric-title">Strain</span>
+                    </div>
+                    <div class="whoop-metric-value">
+                        ${data.strain.toFixed(1)}
+                        <span class="whoop-metric-unit">/ 21</span>
+                    </div>
+                    <div class="whoop-progress-bar">
+                        <div class="whoop-progress-fill" style="width: ${(data.strain / 21) * 100}%; background: ${strainGradient};"></div>
+                    </div>
+                </div>
+
+                <!-- Sleep Card -->
+                <div class="whoop-metric-card">
+                    <div class="whoop-metric-header">
+                        <span class="whoop-metric-title">Sleep</span>
+                    </div>
+                    <div class="whoop-metric-value">
+                        ${data.sleep.duration}
+                        <span class="whoop-metric-unit">hrs</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-top: 12px;">
+                        <div>
+                            <div style="font-size: 11px; color: #888;">Quality</div>
+                            <div style="font-size: 18px; font-weight: 600;">${data.sleep.quality}%</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 11px; color: #888;">helped people</div>
+                            <div style="font-size: 18px; font-weight: 600; color: #00d26a;">
+                                88
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- HRV & RHR -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div class="whoop-metric-card">
+                        <div class="whoop-metric-title">HRV</div>
+                        <div class="whoop-metric-value" style="font-size: 28px;">${data.hrv}</div>
+                        <div style="font-size: 10px; color: #888; margin-top: 4px;">ms</div>
+                    </div>
+                    <div class="whoop-metric-card">
+                        <div class="whoop-metric-title">RHR</div>
+                        <div class="whoop-metric-value" style="font-size: 28px;">${data.rhr}</div>
+                        <div style="font-size: 10px; color: #888; margin-top: 4px;">bpm</div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // Generate Calendar Popup (without header bar - used as overlay)
+    generateCalendarPopup() {
+        const monthData = this.whoopData.monthlyData;
+        const today = new Date();
+        const currentDay = today.getDate();
+        const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+        const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).getDay();
+        const monthName = today.toLocaleString('default', { month: 'long' }).toUpperCase();
+
+        // Calculate days with activity for highlighting
+        const highlightDays = [14, 15, 16, 20, 21]; // Example highlight days
+
+        return `
+            <div class="calendar-popup">
+                <!-- Month Header -->
+                <div class="calendar-popup-header">
+                    <button class="month-nav-btn" id="prev-month-popup">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="15 18 9 12 15 6"/>
+                        </svg>
+                    </button>
+                    <h3 class="calendar-month-title">${monthName}</h3>
+                    <button class="month-nav-btn" id="next-month-popup">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="9 18 15 12 9 6"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Day Headers -->
+                <div class="calendar-popup-grid">
+                    ${['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'].map(day =>
+                        `<div class="calendar-day-header">${day}</div>`
+                    ).join('')}
+
+                    <!-- Empty cells before first day (adjusting for Monday start) -->
+                    ${Array((firstDay === 0 ? 6 : firstDay - 1)).fill('').map(() =>
+                        '<div class="calendar-day-cell empty"></div>'
+                    ).join('')}
+
+                    <!-- Calendar days -->
+                    ${Array.from({length: daysInMonth}, (_, i) => i + 1).map(day => {
+                        const dayData = monthData[day - 1];
+                        const isToday = day === currentDay;
+                        const isHighlighted = highlightDays.includes(day);
+                        const recoveryColor = dayData ? this.getRecoveryColor(dayData.recovery) : '#2a2a2a';
+
+                        return `
+                            <div class="calendar-day-cell ${isToday ? 'today' : ''} ${isHighlighted ? 'highlighted' : ''}"
+                                 data-date="${day}"
+                                 style="border-color: ${isHighlighted ? recoveryColor : 'transparent'};">
+                                <div class="calendar-day-num">${day}</div>
+                                ${isHighlighted ? `<div class="day-indicator" style="background: ${recoveryColor};"></div>` : ''}
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+
+                <!-- Recovery Indicators -->
+                <div class="calendar-indicators">
+                    <span class="indicator-badge green">+83%</span>
+                    <span class="indicator-badge yellow">+61%</span>
+                    <span class="indicator-badge red">60%</span>
+                </div>
+            </div>
+        `;
+    }
+
+    // Generate Profile Popup (for overlay)
+    generateProfilePopup() {
+        const user = this.whoopData.userData;
+
+        return `
+            <div class="profile-popup">
+                <h3 style="font-size: 18px; font-weight: 700; margin-bottom: 20px; text-align: center;">Profile</h3>
+
+                <!-- Profile Picture -->
+                <div style="text-align: center; margin-bottom: 24px;">
+                    <div class="whoop-profile-picture">
+                        ${user.profilePicture ?
+                            `<img src="${user.profilePicture}" alt="Profile">` :
+                            `<svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="#00d26a" stroke-width="1.5">
+                                <circle cx="12" cy="12" r="10"/>
+                                <circle cx="12" cy="10" r="3"/>
+                                <path d="M6.168 18.849A4 4 0 0 1 10 16h4a4 4 0 0 1 3.834 2.855"/>
+                            </svg>`
+                        }
+                    </div>
+                    <div class="whoop-profile-name">${user.name}</div>
+                </div>
+
+                <!-- Stats -->
+                <div class="whoop-metric-card">
+                    <div class="whoop-metric-title">Personal Info</div>
+                    <div style="margin-top: 12px;">
+                        <div class="whoop-info-row">
+                            <span class="whoop-info-label">Age</span>
+                            <span class="whoop-info-value">${user.age} years</span>
+                        </div>
+                        <div class="whoop-info-row">
+                            <span class="whoop-info-label">Weight</span>
+                            <span class="whoop-info-value">${user.weight} lbs</span>
+                        </div>
+                        <div class="whoop-info-row">
+                            <span class="whoop-info-label">Height</span>
+                            <span class="whoop-info-value">${Math.floor(user.height / 12)}' ${user.height % 12}"</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Goals -->
+                <div class="whoop-metric-card">
+                    <div class="whoop-metric-title">Goals</div>
+                    <div style="margin-top: 12px;">
+                        <div style="margin-bottom: 12px;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                                <span style="font-size: 12px; color: #888;">Sleep Goal</span>
+                                <span style="font-size: 12px; font-weight: 600;">8.0 hrs</span>
+                            </div>
+                            <div class="whoop-progress-bar">
+                                <div class="whoop-progress-fill" style="width: 94%; background: #00d26a;"></div>
+                            </div>
+                        </div>
+                        <div>
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                                <span style="font-size: 12px; color: #888;">Strain Goal</span>
+                                <span style="font-size: 12px; font-weight: 600;">15.0</span>
+                            </div>
+                            <div class="whoop-progress-bar">
+                                <div class="whoop-progress-fill" style="width: 97%; background: #ff9500;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Settings Button -->
+                <button class="whoop-btn" onclick="alert('Edit profile functionality coming soon!')">
+                    Edit Profile
+                </button>
+            </div>
+        `;
+    }
+
+    // Generate Sleep View
+    generateSleepView() {
+        const sleepData = this.whoopData.todayMetrics.sleep;
+        const stages = this.whoopData.generateSleepStages();
+
+        return `
+            <div class="whoop-sleep-view">
+                <h3 style="font-size: 18px; font-weight: 700; margin-bottom: 20px; text-align: center;">AI multiplayer interactions</h3>
+
+                <!-- Sleep Duration -->
+                <div class="whoop-metric-card">
+                    <div class="whoop-metric-title">Total interactions</div>
+                    <div class="whoop-metric-value">33</div>
+                </div>
+
+                <!-- Sleep Stages Chart -->
+                <div class="whoop-metric-card">
+                    <div class="whoop-metric-title">Agents</div>
+                    <div class="sleep-stages-chart">
+                        ${stages.map(stage => `
+                            <div class="sleep-stage-bar"
+                                 style="height: ${stage.percentage}%; background: ${stage.color};"
+                                 title="${stage.type}: ${stage.duration} min">
+                            </div>
+                        `).join('')}
+                    </div>
+                    <div class="sleep-stage-legend">
+                        <div class="sleep-stage-legend-item">
+                            <div class="sleep-stage-legend-bar" style="background: #8b5cf6;"></div>
+                            <div class="sleep-stage-legend-label">Hero</div>
+                        </div>
+                        <div class="sleep-stage-legend-item">
+                            <div class="sleep-stage-legend-bar" style="background: #3b82f6;"></div>
+                            <div class="sleep-stage-legend-label">Mentor</div>
+                        </div>
+                        <div class="sleep-stage-legend-item">
+                            <div class="sleep-stage-legend-bar" style="background: #06b6d4;"></div>
+                            <div class="sleep-stage-legend-label">Villain</div>
+                        </div>
+                        <div class="sleep-stage-legend-item">
+                            <div class="sleep-stage-legend-bar" style="background: #ef4444;"></div>
+                            <div class="sleep-stage-legend-label">researcher</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sleep Metrics Grid -->
+                <div class="whoop-stats-grid">
+                    <div class="whoop-metric-card">
+                        <div class="whoop-metric-title">sent</div>
+                        <div class="whoop-metric-value" style="font-size: 28px;">${sleepData.quality}</div>
+                    </div>
+                    <div class="whoop-metric-card">
+                        <div class="whoop-metric-title">received</div>
+                        <div class="whoop-metric-value" style="font-size: 28px; color: #00d26a;">
+                            88
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // Generate Strain View
+    generateStrainView() {
+        const strainData = this.whoopData.todayMetrics.strain;
+        const activities = this.whoopData.activities;
+        const strainColor = this.getStrainColor(strainData);
+
+        return `
+            <div class="whoop-strain-view">
+                <h3 style="font-size: 18px; font-weight: 700; margin-bottom: 20px; text-align: center;">Day Strain</h3>
+
+                <!-- Strain Circle -->
+                <div class="recovery-circle" style="width: 160px; height: 160px; margin: 20px auto;">
+                    <svg width="160" height="160">
+                        <circle cx="80" cy="80" r="65" fill="none" stroke="#2a2a2a" stroke-width="12"/>
+                        <circle cx="80" cy="80" r="65" fill="none" stroke="${strainColor}"
+                                stroke-width="12" stroke-dasharray="408"
+                                stroke-dashoffset="${408 - (408 * strainData / 21)}"
+                                stroke-linecap="round"/>
+                    </svg>
+                    <div class="recovery-score-text">
+                        <div class="recovery-score-value" style="color: ${strainColor};">${strainData.toFixed(1)}</div>
+                        <div class="recovery-score-label">Strain</div>
+                    </div>
+                </div>
+
+                <!-- Activities Timeline -->
+                <div class="whoop-metric-card">
+                    <div class="whoop-metric-title">Today's Activities</div>
+                    <div style="margin-top: 12px;">
+                        ${activities.map(activity => `
+                            <div class="whoop-activity-item">
+                                <div>
+                                    <div class="whoop-activity-name">${activity.name}</div>
+                                    <div class="whoop-activity-time">${activity.time}</div>
+                                </div>
+                                <div class="whoop-activity-strain">
+                                    <div class="whoop-activity-strain-value" style="color: ${this.getStrainColor(activity.strain)};">
+                                        ${activity.strain.toFixed(1)}
+                                    </div>
+                                    <div class="whoop-activity-strain-label">strain</div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+
+                <!-- Strain Zones -->
+                <div class="whoop-metric-card">
+                    <div class="whoop-metric-title">Time in Zones</div>
+                    <div style="margin-top: 12px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <span style="font-size: 12px; color: #888;">Light (0-10)</span>
+                            <span style="font-size: 14px; font-weight: 600;">15 min</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <span style="font-size: 12px; color: #888;">Moderate (10-14)</span>
+                            <span style="font-size: 14px; font-weight: 600;">45 min</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <span style="font-size: 12px; color: #888;">All Out (14-18)</span>
+                            <span style="font-size: 14px; font-weight: 600;">35 min</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // Generate Profile View
+    generateProfileView() {
+        const user = this.whoopData.userData;
+
+        return `
+            <div class="whoop-profile-view">
+                <h3 style="font-size: 18px; font-weight: 700; margin-bottom: 20px; text-align: center;">Profile</h3>
+
+                <!-- Profile Picture -->
+                <div style="text-align: center; margin-bottom: 24px;">
+                    <div class="whoop-profile-picture">
+                        ${user.profilePicture ?
+                            `<img src="${user.profilePicture}" alt="Profile">` :
+                            `<svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="#00d26a" stroke-width="1.5">
+                                <circle cx="12" cy="12" r="10"/>
+                                <circle cx="12" cy="10" r="3"/>
+                                <path d="M6.168 18.849A4 4 0 0 1 10 16h4a4 4 0 0 1 3.834 2.855"/>
+                            </svg>`
+                        }
+                    </div>
+                    <div class="whoop-profile-name">${user.name}</div>
+                </div>
+
+                <!-- Stats -->
+                <div class="whoop-metric-card">
+                    <div class="whoop-metric-title">Personal Info</div>
+                    <div style="margin-top: 12px;">
+                        <div class="whoop-info-row">
+                            <span class="whoop-info-label">Age</span>
+                            <span class="whoop-info-value">${user.age} years</span>
+                        </div>
+                        <div class="whoop-info-row">
+                            <span class="whoop-info-label">Weight</span>
+                            <span class="whoop-info-value">${user.weight} lbs</span>
+                        </div>
+                        <div class="whoop-info-row">
+                            <span class="whoop-info-label">Height</span>
+                            <span class="whoop-info-value">${Math.floor(user.height / 12)}' ${user.height % 12}"</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Goals -->
+                <div class="whoop-metric-card">
+                    <div class="whoop-metric-title">Goals</div>
+                    <div style="margin-top: 12px;">
+                        <div style="margin-bottom: 12px;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                                <span style="font-size: 12px; color: #888;">Sleep Goal</span>
+                                <span style="font-size: 12px; font-weight: 600;">8.0 hrs</span>
+                            </div>
+                            <div class="whoop-progress-bar">
+                                <div class="whoop-progress-fill" style="width: 94%; background: #00d26a;"></div>
+                            </div>
+                        </div>
+                        <div>
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                                <span style="font-size: 12px; color: #888;">Strain Goal</span>
+                                <span style="font-size: 12px; font-weight: 600;">15.0</span>
+                            </div>
+                            <div class="whoop-progress-bar">
+                                <div class="whoop-progress-fill" style="width: 97%; background: #ff9500;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Settings Button -->
+                <button class="whoop-btn" onclick="alert('Edit profile functionality coming soon!')">
+                    Edit Profile
+                </button>
+            </div>
+        `;
+    }
+
+    // Attach Whoop-specific event listeners
+    attachWhoopEventListeners() {
+        // Navigation buttons
+        document.querySelectorAll('.whoop-nav-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const view = e.target.dataset.view;
+                this.switchWhoopView(view);
+            });
+        });
+
+        // Close button
+        const closeBtn = document.getElementById('close-whoop');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                this.hideWhoopDashboard();
+            });
+        }
+
+        // TODAY text click to toggle calendar popup
+        const todayText = document.getElementById('toggle-calendar');
+        if (todayText) {
+            todayText.addEventListener('click', () => {
+                this.toggleCalendarPopup();
+            });
+        }
+
+        // Calendar overlay click (close when clicking outside)
+        const calendarOverlay = document.getElementById('calendar-overlay');
+        if (calendarOverlay) {
+            calendarOverlay.addEventListener('click', (e) => {
+                // Close only if clicking on the overlay itself, not the popup
+                if (e.target === calendarOverlay) {
+                    this.toggleCalendarPopup();
+                }
+            });
+        }
+
+        // Profile icon click to toggle profile popup
+        const profileIcon = document.getElementById('header-profile');
+        if (profileIcon) {
+            profileIcon.addEventListener('click', () => {
+                this.toggleProfilePopup();
+            });
+        }
+
+        // Profile overlay click (close when clicking outside)
+        const profileOverlay = document.getElementById('profile-overlay');
+        if (profileOverlay) {
+            profileOverlay.addEventListener('click', (e) => {
+                // Close only if clicking on the overlay itself, not the popup
+                if (e.target === profileOverlay) {
+                    this.toggleProfilePopup();
+                }
+            });
+        }
+
+        // Calendar day clicks
+        document.querySelectorAll('.calendar-day-cell').forEach(day => {
+            day.addEventListener('click', (e) => {
+                const date = e.currentTarget.dataset.date;
+                if (date) {
+                    console.log('View details for:', date);
+                    // Future: Show detailed day view
+                }
+            });
+        });
+    }
+
+    // Switch between Whoop views
+    switchWhoopView(viewName) {
+        // Update nav buttons
+        document.querySelectorAll('.whoop-nav-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        const activeBtn = document.querySelector(`[data-view="${viewName}"]`);
+        if (activeBtn) {
+            activeBtn.classList.add('active');
+        }
+
+        // Generate new view
+        const container = document.getElementById('whoop-view');
+        if (!container) return;
+
+        let html = '';
+        switch(viewName) {
+            case 'today':
+                html = this.generateTodayView();
+                break;
+            case 'sleep':
+                html = this.generateSleepView();
+                break;
+            case 'strain':
+                html = this.generateStrainView();
+                break;
+        }
+
+        container.innerHTML = html;
+        this.attachWhoopEventListeners();
+    }
+
+    // Toggle calendar popup overlay
+    toggleCalendarPopup() {
+        const overlay = document.getElementById('calendar-overlay');
+        if (overlay) {
+            overlay.classList.toggle('hidden');
+        }
+    }
+
+    // Toggle profile popup overlay
+    toggleProfilePopup() {
+        const overlay = document.getElementById('profile-overlay');
+        if (overlay) {
+            overlay.classList.toggle('hidden');
+        }
+    }
+
+    // Helper: Get recovery color
+    getRecoveryColor(recovery) {
+        if (recovery >= 67) return '#00d26a';  // Green
+        if (recovery >= 34) return '#ffd60a';  // Yellow
+        return '#ff3b30';                      // Red
+    }
+
+    // Helper: Get strain color
+    getStrainColor(strain) {
+        if (strain >= 18) return '#ff3b30';    // Very high
+        if (strain >= 14) return '#ff9500';    // High
+        if (strain >= 10) return '#ffd60a';    // Moderate
+        return '#00d26a';                       // Low
+    }
+
+    // Helper: Get strain gradient
+    getStrainGradient(strain) {
+        if (strain >= 18) return 'linear-gradient(90deg, #ff3b30, #ff6b6b)';
+        if (strain >= 14) return 'linear-gradient(90deg, #ff9500, #ffb84d)';
+        if (strain >= 10) return 'linear-gradient(90deg, #ffd60a, #ffe066)';
+        return 'linear-gradient(90deg, #00d26a, #1fdf64)';
+    }
+
+    // ========== Node Text Editor (Journals Mode) ==========
+
+    openNodeTextEditor(node) {
+        this.editingNode = node;
+
+        // Hide canvas container, show text editor
+        document.querySelector('.canvas-container').style.display = 'none';
+        const editorContainer = document.getElementById('node-text-editor-container');
+        editorContainer.style.display = 'flex';
+
+        // Set node info in header
+        document.getElementById('text-editor-node-type').textContent = node.type;
+        document.getElementById('text-editor-node-type').style.color = node.color;
+
+        // Show Lottie animation for Thought nodes
+        const lottieContainer = document.getElementById('text-editor-lottie');
+        if (node.type === 'Thought' && typeof lottie !== 'undefined') {
+            lottieContainer.classList.add('active');
+            // Clear any existing animation
+            lottieContainer.innerHTML = '';
+            // Load the Octahedron animation
+            this.textEditorLottie = lottie.loadAnimation({
+                container: lottieContainer,
+                renderer: 'svg',
+                loop: true,
+                autoplay: true,
+                path: 'assets/Octahedron.json'
+            });
+        } else {
+            lottieContainer.classList.remove('active');
+            lottieContainer.innerHTML = '';
+        }
+
+        // Load existing text content
+        const textarea = document.getElementById('node-text-editor');
+        textarea.value = node.properties.text || '';
+        textarea.focus();
+
+        // Setup auto-save with debounce
+        this.setupTextEditorAutoSave(node, textarea);
+
+        // Setup back button
+        const backBtn = document.getElementById('back-to-journal-canvas');
+        backBtn.onclick = () => this.closeNodeTextEditor();
+
+        // Update save status
+        this.updateTextEditorSaveStatus('Saved');
+    }
+
+    closeNodeTextEditor() {
+        // Save before closing
+        if (this.editingNode) {
+            const textarea = document.getElementById('node-text-editor');
+            this.editingNode.properties.text = textarea.value;
+            this.workflowManager.markDirty();
+
+            // Save to journal canvas data
+            if (typeof saveCurrentJournalCanvas === 'function') {
+                saveCurrentJournalCanvas();
+            }
+        }
+
+        // Hide text editor, show canvas
+        document.getElementById('node-text-editor-container').style.display = 'none';
+        document.querySelector('.canvas-container').style.display = 'flex';
+
+        // Clean up Lottie animation
+        if (this.textEditorLottie) {
+            this.textEditorLottie.destroy();
+            this.textEditorLottie = null;
+        }
+        const lottieContainer = document.getElementById('text-editor-lottie');
+        if (lottieContainer) {
+            lottieContainer.classList.remove('active');
+            lottieContainer.innerHTML = '';
+        }
+
+        // Clear editing state
+        this.editingNode = null;
+
+        // Clear auto-save timeout
+        if (this.textEditorSaveTimeout) {
+            clearTimeout(this.textEditorSaveTimeout);
+            this.textEditorSaveTimeout = null;
+        }
+
+        // Re-render canvas and fit to view so nodes are visible
+        this.canvasRenderer.render();
+        requestAnimationFrame(() => {
+            this.canvasRenderer.resizeCanvas();
+            this.canvasRenderer.fitToView();
+        });
+    }
+
+    setupTextEditorAutoSave(node, textarea) {
+        // Clear any existing timeout
+        if (this.textEditorSaveTimeout) {
+            clearTimeout(this.textEditorSaveTimeout);
+        }
+
+        textarea.oninput = () => {
+            this.updateTextEditorSaveStatus('Saving...');
+
+            // Debounce save - wait 500ms after last input
+            if (this.textEditorSaveTimeout) {
+                clearTimeout(this.textEditorSaveTimeout);
+            }
+
+            this.textEditorSaveTimeout = setTimeout(() => {
+                node.properties.text = textarea.value;
+                this.workflowManager.markDirty();
+
+                // Save to journal canvas data
+                if (typeof saveCurrentJournalCanvas === 'function') {
+                    saveCurrentJournalCanvas();
+                }
+
+                this.updateTextEditorSaveStatus('Saved');
+            }, 500);
+        };
+    }
+
+    updateTextEditorSaveStatus(status) {
+        const statusEl = document.getElementById('text-editor-save-status');
+        if (statusEl) {
+            statusEl.textContent = status;
+            statusEl.className = 'text-editor-save-status' + (status === 'Saved' ? ' saved' : ' saving');
+        }
     }
 }
 

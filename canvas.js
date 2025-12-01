@@ -23,7 +23,18 @@ class CanvasRenderer {
         this.connectionStart = null;
         this.tempConnectionEnd = null;
 
+        // Marquee selection state
+        this.marquee = null; // { startX, startY, endX, endY } in screen coords
+
         this.resizeCanvas();
+
+        // Keep canvas in sync with its container size (including sidebar collapse/expand)
+        if (window.ResizeObserver) {
+            this.resizeObserver = new ResizeObserver(() => this.resizeCanvas());
+            this.resizeObserver.observe(this.canvas.parentElement);
+        }
+
+        // Fallback for window-level resizes
         window.addEventListener('resize', () => this.resizeCanvas());
     }
 
@@ -110,6 +121,51 @@ class CanvasRenderer {
         this.render();
     }
 
+    // Marquee selection methods
+    setMarquee(startX, startY, endX, endY) {
+        this.marquee = { startX, startY, endX, endY };
+    }
+
+    clearMarquee() {
+        this.marquee = null;
+    }
+
+    getMarqueeBounds() {
+        if (!this.marquee) return null;
+        const { startX, startY, endX, endY } = this.marquee;
+        return {
+            x: Math.min(startX, endX),
+            y: Math.min(startY, endY),
+            width: Math.abs(endX - startX),
+            height: Math.abs(endY - startY)
+        };
+    }
+
+    getNodesInRect(screenRect) {
+        if (!screenRect) return [];
+
+        // Convert screen rect to canvas coords
+        const topLeft = this.screenToCanvas(screenRect.x, screenRect.y);
+        const bottomRight = this.screenToCanvas(
+            screenRect.x + screenRect.width,
+            screenRect.y + screenRect.height
+        );
+
+        const canvasRect = {
+            x: Math.min(topLeft.x, bottomRight.x),
+            y: Math.min(topLeft.y, bottomRight.y),
+            width: Math.abs(bottomRight.x - topLeft.x),
+            height: Math.abs(bottomRight.y - topLeft.y)
+        };
+
+        return this.nodes.filter(node => {
+            return node.x < canvasRect.x + canvasRect.width &&
+                   node.x + node.width > canvasRect.x &&
+                   node.y < canvasRect.y + canvasRect.height &&
+                   node.y + node.height > canvasRect.y;
+        });
+    }
+
     // Delete selected nodes
     deleteSelected() {
         this.selectedNodes.forEach(node => {
@@ -179,9 +235,6 @@ class CanvasRenderer {
         ctx.translate(this.offsetX, this.offsetY);
         ctx.scale(this.scale, this.scale);
 
-        // Draw grid
-        this.drawGrid(ctx);
-
         // Draw connections
         if (window.connectionManager) {
             window.connectionManager.render(ctx);
@@ -199,6 +252,18 @@ class CanvasRenderer {
 
         // Restore state
         ctx.restore();
+
+        // Draw marquee selection rectangle (in screen coordinates)
+        if (this.marquee) {
+            const bounds = this.getMarqueeBounds();
+            ctx.strokeStyle = '#5a9fd4';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 5]);
+            ctx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
+            ctx.fillStyle = 'rgba(90, 159, 212, 0.1)';
+            ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+            ctx.setLineDash([]);
+        }
 
         // Render minimap
         this.renderMinimap();
@@ -234,6 +299,15 @@ class CanvasRenderer {
 
     // Draw individual node
     drawNode(ctx, node) {
+        // Check if in chat mode and node is a chat type
+        const inChatMode = typeof isChatMode === 'function' && isChatMode();
+        const isChatNode = ['SystemMessage', 'UserMessage', 'GPTMessage'].includes(node.type);
+
+        if (inChatMode && isChatNode) {
+            this.drawChatNode(ctx, node);
+            return;
+        }
+
         const isHovered = this.hoveredNode === node;
         const isSelected = node.selected;
 
@@ -277,6 +351,85 @@ class CanvasRenderer {
 
         // Draw properties
         this.drawProperties(ctx, node);
+    }
+
+    // Draw Flux-style chat node (vertical tree with top/bottom handles)
+    drawChatNode(ctx, node) {
+        const isHovered = this.hoveredNode === node;
+        const isSelected = node.selected;
+
+        // Fixed Flux-style dimensions - NO dynamic resizing
+        const width = 150;
+        const height = 50;  // Fixed height regardless of text content
+        // Always show fixed type name for chat nodes
+        const text = node.type === 'SystemMessage' ? 'System' :
+                     node.type === 'UserMessage' ? 'User' : 'Idea';
+
+        // Update node dimensions for hit testing
+        node.width = width;
+        node.height = height;
+
+        // Selection glow (Flux-style orange)
+        if (isSelected) {
+            ctx.shadowColor = '#e73324';
+            ctx.shadowBlur = 20;
+        } else if (isHovered) {
+            ctx.shadowColor = '#1a192b';
+            ctx.shadowBlur = 5;
+        }
+
+        // Node background with node type color
+        ctx.fillStyle = node.color || '#404040';
+        ctx.beginPath();
+        this.roundRect(ctx, node.x, node.y, width, height, 6);
+        ctx.fill();
+
+        // Selection border
+        if (isSelected) {
+            ctx.strokeStyle = '#e73324';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        // Reset shadow
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+
+        // Draw text (dark color for readability on light backgrounds)
+        ctx.fillStyle = '#1a1a1a';
+        ctx.font = '12px Inter, -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // Truncate and wrap text
+        const maxChars = 22;
+        const displayText = text.length > maxChars ?
+            text.substring(0, maxChars - 3) + '...' : text;
+        ctx.fillText(displayText, node.x + width / 2, node.y + height / 2);
+
+        // Draw vertical connection handles
+        const handleRadius = 5;
+
+        // Input handle (top center) - only for User and GPT nodes
+        if (node.type !== 'SystemMessage') {
+            ctx.fillStyle = '#333333';
+            ctx.beginPath();
+            ctx.arc(node.x + width / 2, node.y, handleRadius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#1a1a1a';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+
+        // Output handle (bottom center) - for ALL chat nodes including GPT
+        // This enables continuing conversations from GPT responses
+        ctx.fillStyle = '#333333';
+        ctx.beginPath();
+        ctx.arc(node.x + width / 2, node.y + height, handleRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#1a1a1a';
+        ctx.lineWidth = 1;
+        ctx.stroke();
     }
 
     // Draw node ports
@@ -336,7 +489,15 @@ class CanvasRenderer {
     drawProperties(ctx, node) {
         let yOffset = 40 + (Math.max(node.inputs.length, node.outputs.length) * 20);
 
+        // Check if we're in Journal mode
+        const inJournalMode = typeof isJournalMode === 'function' && isJournalMode();
+
         Object.entries(node.properties).forEach(([key, value]) => {
+            // In Journal mode, skip dataSource property on canvas
+            if (inJournalMode && key === 'dataSource') {
+                return;
+            }
+
             ctx.fillStyle = '#808080';
             ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto';
             ctx.textAlign = 'left';
@@ -412,16 +573,21 @@ class CanvasRenderer {
     // Render minimap
     renderMinimap() {
         const minimapCanvas = document.getElementById('minimap-canvas');
-        if (!minimapCanvas || this.nodes.length === 0) return;
+        if (!minimapCanvas) return;
 
         const minimapCtx = minimapCanvas.getContext('2d');
         const minimapWidth = minimapCanvas.width;
         const minimapHeight = minimapCanvas.height;
 
-        // Clear minimap
+        // Always clear minimap background
         minimapCtx.clearRect(0, 0, minimapWidth, minimapHeight);
         minimapCtx.fillStyle = '#1a1a1a';
         minimapCtx.fillRect(0, 0, minimapWidth, minimapHeight);
+
+        // If there are no nodes, don't draw anything else (prevents stale view)
+        if (this.nodes.length === 0) {
+            return;
+        }
 
         // Calculate bounds of all nodes
         let minX = Infinity, minY = Infinity;
