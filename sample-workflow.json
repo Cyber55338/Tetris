@@ -1,0 +1,214 @@
+{
+  "version": "1.0",
+  "name": "Sample Workflow",
+  "created": "2025-11-14T07:35:00.000Z",
+  "nodes": [
+    {
+      "id": "node_checkpoint_1",
+      "type": "CheckpointLoader",
+      "x": 100,
+      "y": 100,
+      "properties": {
+        "checkpoint_name": "model.safetensors"
+      }
+    },
+    {
+      "id": "node_positive_prompt",
+      "type": "CLIPTextEncode",
+      "x": 450,
+      "y": 50,
+      "properties": {
+        "text": "beautiful landscape, mountains, lake, sunset, highly detailed, 8k"
+      }
+    },
+    {
+      "id": "node_negative_prompt",
+      "type": "CLIPTextEncode",
+      "x": 450,
+      "y": 220,
+      "properties": {
+        "text": "blurry, low quality, distorted"
+      }
+    },
+    {
+      "id": "node_empty_latent",
+      "type": "EmptyLatentImage",
+      "x": 100,
+      "y": 350,
+      "properties": {
+        "width": 512,
+        "height": 512,
+        "batch_size": 1
+      }
+    },
+    {
+      "id": "node_ksampler",
+      "type": "KSampler",
+      "x": 800,
+      "y": 150,
+      "properties": {
+        "seed": 42,
+        "steps": 20,
+        "cfg": 7.0,
+        "sampler_name": "euler",
+        "scheduler": "normal",
+        "denoise": 1.0
+      }
+    },
+    {
+      "id": "node_vae_decode",
+      "type": "VAEDecode",
+      "x": 1150,
+      "y": 150,
+      "properties": {}
+    },
+    {
+      "id": "node_save_image",
+      "type": "SaveImage",
+      "x": 1450,
+      "y": 150,
+      "properties": {
+        "filename_prefix": "ComfyUI"
+      }
+    },
+    {
+      "id": "node_lora",
+      "type": "LoraLoader",
+      "x": 100,
+      "y": 550,
+      "properties": {
+        "lora_name": "lora.safetensors",
+        "strength_model": 1.0,
+        "strength_clip": 1.0
+      }
+    },
+    {
+      "id": "node_image_scale",
+      "type": "ImageScale",
+      "x": 1450,
+      "y": 400,
+      "properties": {
+        "width": 1024,
+        "height": 1024,
+        "method": "lanczos"
+      }
+    }
+  ],
+  "connections": [
+    {
+      "id": "conn_1",
+      "output": {
+        "nodeId": "node_checkpoint_1",
+        "index": 0
+      },
+      "input": {
+        "nodeId": "node_ksampler",
+        "index": 0
+      }
+    },
+    {
+      "id": "conn_2",
+      "output": {
+        "nodeId": "node_checkpoint_1",
+        "index": 1
+      },
+      "input": {
+        "nodeId": "node_positive_prompt",
+        "index": 0
+      }
+    },
+    {
+      "id": "conn_3",
+      "output": {
+        "nodeId": "node_checkpoint_1",
+        "index": 1
+      },
+      "input": {
+        "nodeId": "node_negative_prompt",
+        "index": 0
+      }
+    },
+    {
+      "id": "conn_4",
+      "output": {
+        "nodeId": "node_positive_prompt",
+        "index": 0
+      },
+      "input": {
+        "nodeId": "node_ksampler",
+        "index": 1
+      }
+    },
+    {
+      "id": "conn_5",
+      "output": {
+        "nodeId": "node_negative_prompt",
+        "index": 0
+      },
+      "input": {
+        "nodeId": "node_ksampler",
+        "index": 2
+      }
+    },
+    {
+      "id": "conn_6",
+      "output": {
+        "nodeId": "node_empty_latent",
+        "index": 0
+      },
+      "input": {
+        "nodeId": "node_ksampler",
+        "index": 3
+      }
+    },
+    {
+      "id": "conn_7",
+      "output": {
+        "nodeId": "node_ksampler",
+        "index": 0
+      },
+      "input": {
+        "nodeId": "node_vae_decode",
+        "index": 0
+      }
+    },
+    {
+      "id": "conn_8",
+      "output": {
+        "nodeId": "node_checkpoint_1",
+        "index": 2
+      },
+      "input": {
+        "nodeId": "node_vae_decode",
+        "index": 1
+      }
+    },
+    {
+      "id": "conn_9",
+      "output": {
+        "nodeId": "node_vae_decode",
+        "index": 0
+      },
+      "input": {
+        "nodeId": "node_save_image",
+        "index": 0
+      }
+    },
+    {
+      "id": "conn_10",
+      "output": {
+        "nodeId": "node_vae_decode",
+        "index": 0
+      },
+      "input": {
+        "nodeId": "node_image_scale",
+        "index": 0
+      }
+    }
+  ],
+  "metadata": {
+    "nodeCount": 9,
+    "connectionCount": 10,
+    "description": "Sample workflow demonstrating basic image generation with ComfyUI Clone. Includes checkpoint loading, text prompts, sampling, and image saving."
+  }
+}
