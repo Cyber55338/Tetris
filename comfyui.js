@@ -1,5 +1,64 @@
 // Main Application - ComfyUI Clone
 
+// Global cleanup function for mode switching
+function cleanupAllModeUI() {
+    // Hide tasks view container
+    const tasksView = document.getElementById('tasks-view-container');
+    if (tasksView) tasksView.style.display = 'none';
+
+    // Hide gamification UI if exists
+    if (typeof hideGamificationUI === 'function') {
+        hideGamificationUI();
+    }
+
+    // Ensure canvas is visible
+    const canvas = document.querySelector('.canvas-container');
+    if (canvas) canvas.style.display = 'flex';
+
+    // Show properties panel
+    const props = document.getElementById('properties-panel');
+    if (props) props.style.display = '';
+
+    // Show workflow buttons
+    const executeBtn = document.getElementById('btn-execute');
+    const simulateBtn = document.getElementById('btn-simulate');
+    const sendBtn = document.getElementById('btn-send');
+    if (executeBtn) executeBtn.style.display = '';
+    if (simulateBtn) simulateBtn.style.display = '';
+    if (sendBtn) sendBtn.style.display = '';
+
+    // Restore all toolbar buttons (hidden by Tasks mode)
+    const btnNew = document.getElementById('btn-new');
+    const btnSave = document.getElementById('btn-save');
+    const btnClear = document.getElementById('btn-clear');
+    const btnLoad = document.getElementById('btn-load');
+    const btnDownload = document.getElementById('btn-download');
+    const btnZoomIn = document.getElementById('btn-zoom-in');
+    const btnZoomOut = document.getElementById('btn-zoom-out');
+    const btnFitView = document.getElementById('btn-fit-view');
+    const btnProfile = document.getElementById('btn-profile');
+    const zoomLevel = document.getElementById('zoom-level');
+
+    if (btnNew) btnNew.style.display = '';
+    if (btnSave) btnSave.style.display = '';
+    if (btnClear) btnClear.style.display = '';
+    if (btnLoad) btnLoad.style.display = '';
+    if (btnDownload) btnDownload.style.display = '';
+    if (btnZoomIn) btnZoomIn.style.display = '';
+    if (btnZoomOut) btnZoomOut.style.display = '';
+    if (btnFitView) btnFitView.style.display = '';
+    if (btnProfile) btnProfile.style.display = '';
+    if (zoomLevel) zoomLevel.style.display = '';
+
+    // Remove connection status indicator if it exists (cleanup orphaned element)
+    const connectionIndicator = document.getElementById('connection-status-indicator');
+    if (connectionIndicator) connectionIndicator.remove();
+
+    // Restore toolbar separators
+    document.querySelectorAll('.toolbar-separator').forEach(sep => sep.style.display = '');
+}
+window.cleanupAllModeUI = cleanupAllModeUI;
+
 class ComfyUIApp {
     constructor() {
         this.canvas = document.getElementById('workflow-canvas');
@@ -11,6 +70,10 @@ class ComfyUIApp {
         window.connectionManager = this.connectionManager;
         window.canvasRenderer = this.canvasRenderer;
         window.workflowManager = this.workflowManager;
+
+        // Annotation Manager (for Journals mode text/arrow annotations)
+        this.annotationManager = new AnnotationManager(this.canvas);
+        window.annotationManager = this.annotationManager;
 
         // Interaction state
         this.isDraggingNode = false;
@@ -36,10 +99,54 @@ class ComfyUIApp {
         // Clipboard
         this.clipboard = null;
 
-        // Whoop Health Dashboard
-        this.whoopData = whoopDataManager;
-        this.isWhoopViewActive = false;
+        // Simulation mode state
+        this.simulationMode = false;
+        this.simulationNodes = [];           // Execution order array
+        this.currentSimulationStep = -1;     // Current step index (-1 = not started)
+        this.simulationAnimationId = null;   // requestAnimationFrame ID
+        this.simulationParticles = [];       // Active particles for connection animation
+        this.generatingNodeIds = [];         // Nodes currently generating AI content
+        this.isGenerating = false;           // Flag to prevent multiple generations
+        this.isAnimatingStep = false;        // Flag to prevent multiple step advances
+        this.watchShape = localStorage.getItem('idea-engine-watch-shape') || 'round';  // Watch shape: 'round' or 'square'
+        this.typewriterIntervalId = null;    // Typewriter effect interval ID
+        this.watchDisplayTimeoutId = null;   // Watch display delay timeout ID
+        this.watchDisplayVersion = 0;        // Version counter to cancel stale updates
+        this.generatingDotsIntervalId = null; // Generating dots animation interval ID
+        this.simulationAbortController = null; // AbortController for simulation listeners
+        this.showingPropertiesInSimulation = false; // Track if showing properties while in simulation mode
+
+        // Profile Dashboard state
+        this.isProfileViewActive = false;
         this.originalPropertiesContent = null;
+        this.profileData = {
+            username: 'User',
+            address: '0x742d35Cc6634C0532925a3b844Bc9e7595F3e8',
+            followers: 0,
+            following: 0,
+            created: 0,
+            tokens: [
+                { symbol: 'ETH', name: 'Ethereum', type: 'Native Gas Token', balance: 1.2345, usd: 2847.50 },
+                { symbol: 'BNB', name: 'BNB', type: 'Native Gas Token', balance: 0.1576, usd: 94.56 },
+                { symbol: 'USDT', name: 'Tether', type: 'Stablecoin', balance: 500.00, usd: 500.00 },
+                { symbol: 'MATIC', name: 'Polygon', type: 'Layer 2 Token', balance: 250.75, usd: 187.50 }
+            ],
+            holdings: [
+                { symbol: 'TOP', name: 'Top Coin', balance: 98055714.57 }
+            ]
+        };
+
+        // Profile & Smartwatch Connection State
+        this.isProfileConnected = localStorage.getItem('idea-engine-profile-connected') === 'true';
+        this.connectedSmartwatch = localStorage.getItem('idea-engine-smartwatch') || null;
+        this.availableSmartwatches = [
+            { id: 'apple-watch', name: 'Apple Watch Series 9', brand: 'Apple', icon: '⌚' },
+            { id: 'galaxy-watch', name: 'Galaxy Watch 6', brand: 'Samsung', icon: '⌚' },
+            { id: 'fitbit-sense', name: 'Fitbit Sense 2', brand: 'Fitbit', icon: '⌚' },
+            { id: 'garmin-venu', name: 'Garmin Venu 3', brand: 'Garmin', icon: '⌚' },
+            { id: 'pixel-watch', name: 'Pixel Watch 2', brand: 'Google', icon: '⌚' },
+            { id: 'amazfit-gtr', name: 'Amazfit GTR 4', brand: 'Amazfit', icon: '⌚' }
+        ];
 
         // Initialize
         this.initializeUI();
@@ -70,6 +177,9 @@ class ComfyUIApp {
         window.updateZoomDisplay = (scale) => {
             document.getElementById('zoom-level').textContent = Math.round(scale * 100) + '%';
         };
+
+        // Initialize connection UI state
+        this.updateConnectionUI();
     }
 
     setupEventListeners() {
@@ -77,6 +187,15 @@ class ComfyUIApp {
         document.getElementById('btn-new').addEventListener('click', () => {
             // In chat mode, this is handled by chat.js
             if (typeof isChatMode === 'function' && isChatMode()) return;
+
+            // In journals mode, show add date popup
+            if (typeof isJournalMode === 'function' && isJournalMode()) {
+                if (typeof showAddDatePopup === 'function') {
+                    showAddDatePopup();
+                }
+                return;
+            }
+
             this.workflowManager.newWorkflow();
             this.updateNodeCount();
         });
@@ -112,8 +231,20 @@ class ComfyUIApp {
         });
 
         document.getElementById('btn-send').addEventListener('click', () => {
-            console.log('Send button clicked - functionality to be implemented');
-            // Placeholder for future functionality
+            // Only in Design Flow mode (not chat, journal, or agent mode)
+            const inChatMode = typeof isChatMode === 'function' && isChatMode();
+            const inJournalMode = typeof isJournalMode === 'function' && isJournalMode();
+            const inAgentMode = typeof isAgentMode === 'function' && isAgentMode();
+
+            if (!inChatMode && !inJournalMode && !inAgentMode) {
+                if (typeof showAgentSelector === 'function') {
+                    showAgentSelector();
+                }
+            }
+        });
+
+        document.getElementById('btn-download').addEventListener('click', () => {
+            this.workflowManager.saveWorkflow();
         });
 
         document.getElementById('btn-clear').addEventListener('click', () => {
@@ -140,12 +271,36 @@ class ComfyUIApp {
             this.canvasRenderer.fitToView();
         });
 
-        // Profile button
+        // Profile button - toggle profile dashboard
         document.getElementById('btn-profile').addEventListener('click', () => {
-            if (this.isWhoopViewActive) {
-                this.hideWhoopDashboard();
+            if (this.isProfileViewActive) {
+                this.hideProfileDashboard();
             } else {
-                this.showWhoopDashboard();
+                this.showProfileDashboard();
+            }
+        });
+
+        // Profile Connect button
+        document.getElementById('btn-profile-connect').addEventListener('click', () => {
+            this.toggleProfileConnection();
+        });
+
+        // Smartwatch button
+        document.getElementById('btn-smartwatch').addEventListener('click', () => {
+            if (this.isProfileConnected) {
+                this.showSmartwatchSelector();
+            }
+        });
+
+        // Smartwatch selector cancel button
+        document.getElementById('cancel-smartwatch-select').addEventListener('click', () => {
+            this.hideSmartwatchSelector();
+        });
+
+        // Close smartwatch selector on overlay click
+        document.getElementById('smartwatch-selector-overlay').addEventListener('click', (e) => {
+            if (e.target.id === 'smartwatch-selector-overlay') {
+                this.hideSmartwatchSelector();
             }
         });
 
@@ -208,6 +363,13 @@ class ComfyUIApp {
             const handleToggle = () => {
                 panel.classList.toggle('collapsed');
                 updateAria();
+
+                // Sync body class for simulation mode collapsed state
+                if (panel.id === 'properties-panel') {
+                    const isCollapsed = panel.classList.contains('collapsed');
+                    document.body.classList.toggle('simulation-collapsed', isCollapsed);
+                }
+
                 // When sidebars resize, also resize the canvas so it fills the new space
                 if (this.canvasRenderer) {
                     this.canvasRenderer.resizeCanvas();
@@ -244,6 +406,7 @@ class ComfyUIApp {
         document.addEventListener('click', () => {
             this.hideContextMenu();
             this.hideWorkflowContextMenu();
+            this.hideAnnotationContextMenu();
         });
 
         // Workflow context menu actions
@@ -315,29 +478,64 @@ class ComfyUIApp {
         }
 
         if (clickedPort) {
-            // Start connection
-            if (clickedPort.type === 'output') {
+            // Start connection from either output OR input port
+            if (clickedPort.type === 'output' || clickedPort.type === 'input') {
                 this.isConnecting = true;
                 this.connectionStartPort = {
                     node: clickedNode,
-                    type: 'output',
+                    type: clickedPort.type,  // 'output' or 'input'
                     index: clickedPort.index,
                     port: clickedPort.port
                 };
-                this.canvasRenderer.connectionStart = clickedNode.getOutputPosition(clickedPort.index);
-                this.canvasRenderer.isConnecting = true;
-            } else if (clickedPort.type === 'input') {
-                // Remove existing connection if any
-                if (clickedPort.port.connection) {
-                    this.connectionManager.removeConnection(clickedPort.port.connection);
-                    this.canvasRenderer.render();
+                // Set visual start position based on port type
+                if (clickedPort.type === 'output') {
+                    this.canvasRenderer.connectionStart = clickedNode.getOutputPosition(clickedPort.index);
+                } else {
+                    this.canvasRenderer.connectionStart = clickedNode.getInputPosition(clickedPort.index);
                 }
+                this.canvasRenderer.isConnecting = true;
             }
             return;
         }
 
         // Check for node click
         const clickedNode2 = this.canvasRenderer.getNodeAtPosition(canvasPos.x, canvasPos.y);
+
+        // In Journals mode, check for annotation clicks before node clicks
+        if (typeof isJournalMode === 'function' && isJournalMode() && this.annotationManager && !clickedNode2) {
+            const clickedAnnotation = this.annotationManager.getAnnotationAtPosition(canvasPos.x, canvasPos.y);
+
+            if (clickedAnnotation) {
+                // Check if clicking on text resize handle
+                if (clickedAnnotation.type === 'text' && clickedAnnotation.selected) {
+                    const resizeHandle = this.annotationManager.getTextResizeHandle(canvasPos.x, canvasPos.y, clickedAnnotation);
+                    if (resizeHandle) {
+                        this.annotationManager.startTextResize(clickedAnnotation, resizeHandle, canvasPos);
+                        return;
+                    }
+                }
+
+                // Check if clicking on arrow endpoint handle
+                if (clickedAnnotation.type === 'arrow' && clickedAnnotation.selected) {
+                    const endpoint = this.annotationManager.getArrowEndpointHandle(canvasPos.x, canvasPos.y, clickedAnnotation);
+                    if (endpoint) {
+                        this.annotationManager.startEndpointEdit(clickedAnnotation, endpoint);
+                        return;
+                    }
+                }
+
+                // Select and start dragging annotation
+                this.annotationManager.startDragging(clickedAnnotation, canvasPos.x, canvasPos.y);
+                this.canvasRenderer.render();
+                return;
+            }
+
+            // Shift+drag on empty canvas in Journal mode: start arrow drawing
+            if (e.shiftKey && e.button === 0) {
+                this.annotationManager.startArrowDrawing(canvasPos.x, canvasPos.y);
+                return;
+            }
+        }
 
         if (clickedNode2) {
             // Start dragging node
@@ -416,6 +614,37 @@ class ComfyUIApp {
         document.getElementById('canvas-coords').textContent =
             `X: ${Math.round(canvasPos.x)}, Y: ${Math.round(canvasPos.y)}`;
 
+        // Handle annotation operations in Journals mode
+        if (typeof isJournalMode === 'function' && isJournalMode() && this.annotationManager) {
+            // Text box resizing
+            if (this.annotationManager.isResizingText) {
+                this.annotationManager.updateTextResize(canvasPos.x, canvasPos.y);
+                this.canvasRenderer.render();
+                return;
+            }
+
+            // Arrow drawing
+            if (this.annotationManager.isDrawingArrow) {
+                this.annotationManager.updateArrowDrawing(canvasPos.x, canvasPos.y);
+                this.canvasRenderer.render();
+                return;
+            }
+
+            // Annotation dragging
+            if (this.annotationManager.isDraggingAnnotation) {
+                this.annotationManager.updateDragging(canvasPos.x, canvasPos.y);
+                this.canvasRenderer.render();
+                return;
+            }
+
+            // Arrow endpoint editing
+            if (this.annotationManager.editingEndpoint) {
+                this.annotationManager.updateEndpoint(canvasPos.x, canvasPos.y);
+                this.canvasRenderer.render();
+                return;
+            }
+        }
+
         if (this.isDraggingNode && this.dragOffsets) {
             // Drag all selected nodes together
             for (const [node, offset] of this.dragOffsets) {
@@ -486,6 +715,37 @@ class ComfyUIApp {
     }
 
     onCanvasMouseUp(e) {
+        // Handle annotation operations in Journals mode
+        if (typeof isJournalMode === 'function' && isJournalMode() && this.annotationManager) {
+            // Stop text box resizing
+            if (this.annotationManager.isResizingText) {
+                this.annotationManager.stopTextResize();
+                this.canvasRenderer.render();
+                return;
+            }
+
+            // Finish arrow drawing
+            if (this.annotationManager.isDrawingArrow) {
+                this.annotationManager.finishArrowDrawing();
+                this.canvasRenderer.render();
+                return;
+            }
+
+            // Stop annotation dragging
+            if (this.annotationManager.isDraggingAnnotation) {
+                this.annotationManager.stopDragging();
+                this.canvasRenderer.render();
+                return;
+            }
+
+            // Stop endpoint editing
+            if (this.annotationManager.editingEndpoint) {
+                this.annotationManager.stopEndpointEdit();
+                this.canvasRenderer.render();
+                return;
+            }
+        }
+
         if (this.isConnecting) {
             // End connection
             const rect = this.canvas.getBoundingClientRect();
@@ -493,14 +753,18 @@ class ComfyUIApp {
             const screenY = e.clientY - rect.top;
             const canvasPos = this.canvasRenderer.screenToCanvas(screenX, screenY);
 
+            // Determine target port type based on where we started
+            const startedFromOutput = this.connectionStartPort.type === 'output';
+            const targetPortType = startedFromOutput ? 'input' : 'output';
+
             // Find target - first try specific port, then fall back to node
             let targetNode = null;
             let targetPortIndex = null;
 
-            // First: Try to find exact port (existing precise behavior)
+            // First: Try to find exact port of the opposite type
             for (const node of this.canvasRenderer.nodes) {
                 const port = node.getPortAtPosition(canvasPos.x, canvasPos.y);
-                if (port && port.type === 'input') {
+                if (port && port.type === targetPortType) {
                     targetNode = node;
                     targetPortIndex = port.index;
                     break;
@@ -514,11 +778,21 @@ class ComfyUIApp {
                         // Skip the source node (can't connect to self)
                         if (node === this.connectionStartPort.node) continue;
 
-                        // Find first available input port
-                        if (node.inputs && node.inputs.length > 0) {
-                            targetNode = node;
-                            targetPortIndex = 0; // First input port
-                            break;
+                        // Find first available port of target type
+                        if (startedFromOutput) {
+                            // Looking for input port
+                            if (node.inputs && node.inputs.length > 0) {
+                                targetNode = node;
+                                targetPortIndex = 0;
+                                break;
+                            }
+                        } else {
+                            // Looking for output port
+                            if (node.outputs && node.outputs.length > 0) {
+                                targetNode = node;
+                                targetPortIndex = 0;
+                                break;
+                            }
                         }
                     }
                 }
@@ -526,14 +800,28 @@ class ComfyUIApp {
 
             // Create connection if we found a valid target
             if (targetNode && targetPortIndex !== null) {
-                const targetPort = { index: targetPortIndex, port: targetNode.inputs[targetPortIndex] };
-                if (this.connectionManager.canConnect(this.connectionStartPort, targetPort)) {
-                    this.connectionManager.addConnection(
-                        this.connectionStartPort.node,
-                        this.connectionStartPort.index,
-                        targetNode,
-                        targetPortIndex
-                    );
+                let outputNode, outputIndex, inputNode, inputIndex;
+
+                if (startedFromOutput) {
+                    // Started from output, target is input
+                    outputNode = this.connectionStartPort.node;
+                    outputIndex = this.connectionStartPort.index;
+                    inputNode = targetNode;
+                    inputIndex = targetPortIndex;
+                } else {
+                    // Started from input, target is output (REVERSE)
+                    outputNode = targetNode;
+                    outputIndex = targetPortIndex;
+                    inputNode = this.connectionStartPort.node;
+                    inputIndex = this.connectionStartPort.index;
+                }
+
+                // Validate and create connection
+                const outputPort = { index: outputIndex, port: outputNode.outputs[outputIndex] };
+                const inputPort = { index: inputIndex, port: inputNode.inputs[inputIndex] };
+
+                if (this.connectionManager.canConnect(outputPort, inputPort)) {
+                    this.connectionManager.addConnection(outputNode, outputIndex, inputNode, inputIndex);
                     this.workflowManager.markDirty();
                 } else {
                     this.workflowManager.showNotification('Incompatible port types', 'error');
@@ -600,6 +888,18 @@ class ComfyUIApp {
         const canvasPos = this.canvasRenderer.screenToCanvas(screenX, screenY);
         this.lastContextMenuCanvasPos = canvasPos;
 
+        // Check if right-clicked on annotation in Journals mode
+        if (typeof isJournalMode === 'function' && isJournalMode() && this.annotationManager) {
+            const clickedAnnotation = this.annotationManager.getAnnotationAtPosition(canvasPos.x, canvasPos.y);
+            if (clickedAnnotation) {
+                this.annotationManager.selectAnnotation(clickedAnnotation);
+                this.selectedAnnotationForContextMenu = clickedAnnotation;
+                this.canvasRenderer.render();
+                this.showAnnotationContextMenu(e.clientX, e.clientY);
+                return;
+            }
+        }
+
         // Position context menu at cursor (viewport coordinates for position: fixed)
         this.showContextMenu(e.clientX, e.clientY);
     }
@@ -615,6 +915,24 @@ class ComfyUIApp {
         if (clickedNode && typeof isJournalMode === 'function' && isJournalMode()) {
             this.openNodeTextEditor(clickedNode);
             return;
+        }
+
+        // Check if double-clicked on an annotation in Journals mode
+        if (typeof isJournalMode === 'function' && isJournalMode() && this.annotationManager) {
+            const clickedAnnotation = this.annotationManager.getAnnotationAtPosition(canvasPos.x, canvasPos.y);
+            if (clickedAnnotation) {
+                if (clickedAnnotation.type === 'text') {
+                    // Edit existing text annotation
+                    this.annotationManager.openTextEditor(clickedAnnotation);
+                }
+                return;
+            }
+
+            // Double-click on empty canvas in Journal mode: create text annotation
+            if (!clickedNode) {
+                this.annotationManager.createTextAnnotation(canvasPos.x, canvasPos.y);
+                return;
+            }
         }
 
         // Check if double-clicked on a connection
@@ -657,13 +975,25 @@ class ComfyUIApp {
 
         // Delete key
         if (e.key === 'Delete' || e.key === 'Backspace') {
-            // Only delete nodes if NOT typing in an input field
-            if (!isTyping && this.canvasRenderer.selectedNodes.length > 0) {
-                e.preventDefault();
-                this.canvasRenderer.deleteSelected();
-                this.updateNodeCount();
-                this.updatePropertiesPanel(null);
-                this.workflowManager.markDirty();
+            // Only delete if NOT typing in an input field
+            if (!isTyping) {
+                // First check for selected annotation in Journals mode
+                if (typeof isJournalMode === 'function' && isJournalMode() &&
+                    this.annotationManager && this.annotationManager.selectedAnnotation) {
+                    e.preventDefault();
+                    this.annotationManager.deleteSelected();
+                    this.canvasRenderer.render();
+                    return;
+                }
+
+                // Then check for selected nodes
+                if (this.canvasRenderer.selectedNodes.length > 0) {
+                    e.preventDefault();
+                    this.canvasRenderer.deleteSelected();
+                    this.updateNodeCount();
+                    this.updatePropertiesPanel(null);
+                    this.workflowManager.markDirty();
+                }
             }
         }
 
@@ -749,6 +1079,11 @@ class ComfyUIApp {
         container.innerHTML = '';
 
         for (const [categoryId, nodes] of Object.entries(categories)) {
+            // Hide chat nodes from Design Flow sidebar (only used in Chat mode)
+            if (categoryId === 'chat') {
+                continue;
+            }
+
             const categoryInfo = NodeCategories[categoryId] || { title: categoryId, icon: '📦' };
 
             const categoryDiv = document.createElement('div');
@@ -772,12 +1107,53 @@ class ComfyUIApp {
             const nodesContainer = document.createElement('div');
             nodesContainer.className = 'category-nodes';
 
+            // Animation paths for sidebar
+            const sidebarAnimations = {
+                'Thought': 'assets/Tetrahedron.json',
+                'Imagination': 'assets/Octahedron.json',
+                'Action': 'assets/Dodecahedron.json',
+                'Belief': 'assets/Icosahedron.json',
+                'Emotion': 'assets/Cube.json',
+                'Dreams': 'assets/dreams.json',
+                'Goals': 'assets/goals.json',
+                'Rules': 'assets/rules.json',
+                'Memories': 'assets/memories.json',
+                'Questions': 'assets/questions.json',
+                'Danger': 'assets/dangers.json',
+                'Expressions': 'assets/heart.json',
+                'Problem': 'assets/question.json',
+                'Instructions': 'assets/idea.json'
+            };
+
             nodes.forEach(nodeInfo => {
                 const nodeItem = document.createElement('div');
                 nodeItem.className = 'node-item';
-                nodeItem.textContent = nodeInfo.title;
                 nodeItem.dataset.nodeType = nodeInfo.type;
                 nodeItem.dataset.nodeTitle = nodeInfo.title;
+
+                // Check if this node has a Lottie animation
+                const animPath = sidebarAnimations[nodeInfo.type];
+
+                if (animPath && typeof lottie !== 'undefined') {
+                    // Lottie animation container
+                    const lottieContainer = document.createElement('div');
+                    lottieContainer.className = 'sidebar-node-lottie';
+                    nodeItem.appendChild(lottieContainer);
+
+                    lottie.loadAnimation({
+                        container: lottieContainer,
+                        renderer: 'svg',
+                        loop: true,
+                        autoplay: true,
+                        path: animPath
+                    });
+                }
+
+                // Node title
+                const title = document.createElement('span');
+                title.className = 'node-title';
+                title.textContent = nodeInfo.title;
+                nodeItem.appendChild(title);
 
                 // Drag and drop
                 nodeItem.draggable = true;
@@ -818,19 +1194,66 @@ class ComfyUIApp {
     }
 
     filterNodes(query) {
-        const items = document.querySelectorAll('.node-item');
-        const lowerQuery = query.toLowerCase();
+        const categories = document.querySelectorAll('.node-category');
+        const lowerQuery = query.toLowerCase().trim();
+        let totalVisible = 0;
 
-        items.forEach(item => {
-            const title = item.dataset.nodeTitle.toLowerCase();
-            const type = item.dataset.nodeType.toLowerCase();
+        categories.forEach(category => {
+            const categoryName = category.dataset.category;
+            const categoryTitle = NodeCategories[categoryName]?.title?.toLowerCase() || '';
+            const items = category.querySelectorAll('.node-item');
+            let visibleInCategory = 0;
 
-            if (title.includes(lowerQuery) || type.includes(lowerQuery)) {
-                item.classList.remove('hidden');
+            items.forEach(item => {
+                const title = item.dataset.nodeTitle?.toLowerCase() || '';
+                const type = item.dataset.nodeType?.toLowerCase() || '';
+
+                // Match against title, type, or category name
+                const matches = !lowerQuery ||
+                    title.includes(lowerQuery) ||
+                    type.includes(lowerQuery) ||
+                    categoryTitle.includes(lowerQuery);
+
+                if (matches) {
+                    item.classList.remove('hidden');
+                    visibleInCategory++;
+                    totalVisible++;
+                } else {
+                    item.classList.add('hidden');
+                }
+            });
+
+            // Hide category if no visible nodes
+            if (visibleInCategory === 0 && lowerQuery) {
+                category.classList.add('hidden');
             } else {
-                item.classList.add('hidden');
+                category.classList.remove('hidden');
+                // Auto-expand categories with matches when searching
+                if (lowerQuery && visibleInCategory > 0) {
+                    category.classList.remove('collapsed');
+                }
             }
         });
+
+        // Show/hide "no results" message
+        this.updateSearchNoResults(totalVisible === 0 && lowerQuery);
+    }
+
+    updateSearchNoResults(show) {
+        let noResults = document.getElementById('search-no-results');
+
+        if (show) {
+            if (!noResults) {
+                noResults = document.createElement('div');
+                noResults.id = 'search-no-results';
+                noResults.className = 'search-no-results';
+                noResults.textContent = 'No nodes found';
+                document.getElementById('node-categories').appendChild(noResults);
+            }
+            noResults.style.display = 'block';
+        } else if (noResults) {
+            noResults.style.display = 'none';
+        }
     }
 
     addNode(nodeType, x, y) {
@@ -863,6 +1286,23 @@ class ComfyUIApp {
             return;
         }
 
+        // During simulation mode: handle smart switching between simulation and properties
+        if (this.simulationMode) {
+            const header = document.querySelector('#properties-panel .sidebar-header h2');
+            if (node) {
+                // User clicked a node - show properties temporarily
+                this.showingPropertiesInSimulation = true;
+                if (header) header.textContent = 'Properties';
+                // Continue to show properties below...
+            } else {
+                // User clicked empty canvas - return to simulation
+                this.showingPropertiesInSimulation = false;
+                this.renderSimulationPanel();
+                if (header) header.textContent = 'Simulation';
+                return;
+            }
+        }
+
         const container = document.getElementById('properties-content');
 
         if (!node) {
@@ -882,12 +1322,11 @@ class ComfyUIApp {
 
         let html = '';
 
-        // Check if this is a Hero Journey node
-        const isHeroJourneyNode = ['Hero', 'Mentor', 'Villain'].includes(node.type);
-
-        // Profile Picture Section
-        if (isHeroJourneyNode || (node.properties.image && node.properties.image !== '')) {
-            const hasImage = node.properties.image && node.properties.image !== '';
+        // Profile Picture Section for Agent node only
+        if (node.type === 'Agent') {
+            // Only treat as valid image if it's a data URL (base64) or http/https URL
+            const imageValue = node.properties.image || '';
+            const hasImage = imageValue.startsWith('data:') || imageValue.startsWith('http://') || imageValue.startsWith('https://');
             html += `
                 <div class="property-group" style="text-align: center; margin-bottom: 16px;">
                     ${hasImage ? `
@@ -895,7 +1334,7 @@ class ComfyUIApp {
                              style="width: 150px; height: 150px; border-radius: 75px; object-fit: cover; border: 3px solid ${node.color};"
                              onerror="this.style.display='none'"
                              alt="Profile">
-                    ` : (isHeroJourneyNode ? `
+                    ` : `
                         <div style="width: 150px; height: 150px; border-radius: 75px; border: 3px solid ${node.color};
                                     margin: 0 auto; display: flex; align-items: center; justify-content: center;
                                     background: #1a1a1a;">
@@ -905,7 +1344,7 @@ class ComfyUIApp {
                                 <path d="M6.168 18.849A4 4 0 0 1 10 16h4a4 4 0 0 1 3.834 2.855"/>
                             </svg>
                         </div>
-                    ` : '')}
+                    `}
                 </div>
             `;
         }
@@ -975,8 +1414,10 @@ class ComfyUIApp {
                 let formattedLabel;
                 if (key === 'dataSource') {
                     formattedLabel = 'Data source';
-                } else if (key === 'text' && isHeroJourneyNode) {
+                } else if (key === 'text' && node.type === 'Agent') {
                     formattedLabel = 'Prompt';
+                } else if (key === 'image' && node.type === 'Agent') {
+                    formattedLabel = 'Profile Image';
                 } else {
                     formattedLabel = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
                 }
@@ -991,27 +1432,56 @@ class ComfyUIApp {
                     });
                     html += `</select>`;
                 } else if (propDef?.type === 'text') {
-                    // Use larger textarea for Hero Journey nodes' prompt field
-                    const rows = (key === 'text' && isHeroJourneyNode) ? '8' : '3';
+                    // Use larger textarea for Agent nodes' prompt field
+                    const rows = (key === 'text' && node.type === 'Agent') ? '16' : '12';
                     html += `<textarea class="property-input" data-property="${key}" rows="${rows}">${value}</textarea>`;
+
+                    // Add buttons below TEXT/Prompt field for Agent nodes
+                    if (key === 'text' && node.type === 'Agent') {
+                        html += `
+                            <div style="display: flex; gap: 8px; margin-top: 8px;">
+                                <button class="btn btn-primary" id="generate-text-btn-${node.id}"
+                                        style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                                        <path d="M2 17l10 5 10-5"/>
+                                        <path d="M2 12l10 5 10-5"/>
+                                    </svg>
+                                    Generate with AI
+                                </button>
+                                <button class="btn btn-secondary" id="add-text-file-btn-${node.id}"
+                                        style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                        <polyline points="17 8 12 3 7 8"/>
+                                        <line x1="12" y1="3" x2="12" y2="15"/>
+                                    </svg>
+                                    Add file
+                                </button>
+                            </div>
+                        `;
+                    }
+                } else if (key === 'image' && node.type === 'Agent') {
+                    // For Agent nodes, don't show the image text input (just show buttons)
+                    // This prevents users from typing text that gets treated as a URL
                 } else {
                     html += `<input type="text" class="property-input" data-property="${key}" value="${value}">`;
                 }
 
-                // Add buttons below image input for Hero Journey nodes
-                if (key === 'image' && isHeroJourneyNode) {
+                // Add buttons below IMAGE field for Agent nodes
+                if (key === 'image' && node.type === 'Agent') {
                     html += `
                         <div style="display: flex; gap: 8px; margin-top: 8px;">
-                            <button class="btn btn-primary" id="generate-ai-btn-${node.id}"
+                            <button class="btn btn-primary" id="generate-image-btn-${node.id}"
                                     style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                                    <path d="M2 17l10 5 10-5"/>
-                                    <path d="M2 12l10 5 10-5"/>
+                                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                    <circle cx="8.5" cy="8.5" r="1.5"/>
+                                    <polyline points="21 15 16 10 5 21"/>
                                 </svg>
                                 Generate with AI
                             </button>
-                            <button class="btn btn-secondary" id="add-file-btn-${node.id}"
+                            <button class="btn btn-secondary" id="add-image-file-btn-${node.id}"
                                     style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -1056,17 +1526,32 @@ class ComfyUIApp {
             });
         }
 
-        // Add event listeners for Hero Journey node buttons
-        const generateAIBtn = document.getElementById(`generate-ai-btn-${node.id}`);
-        if (generateAIBtn) {
-            generateAIBtn.addEventListener('click', () => {
+        // Add event listeners for Agent node TEXT buttons
+        const generateTextBtn = document.getElementById(`generate-text-btn-${node.id}`);
+        if (generateTextBtn) {
+            generateTextBtn.addEventListener('click', () => {
                 this.generateNodeContentWithAI(node);
             });
         }
 
-        const addFileBtn = document.getElementById(`add-file-btn-${node.id}`);
-        if (addFileBtn) {
-            addFileBtn.addEventListener('click', () => {
+        const addTextFileBtn = document.getElementById(`add-text-file-btn-${node.id}`);
+        if (addTextFileBtn) {
+            addTextFileBtn.addEventListener('click', () => {
+                this.handleTextFileUpload(node);
+            });
+        }
+
+        // Add event listeners for Agent node IMAGE buttons
+        const generateImageBtn = document.getElementById(`generate-image-btn-${node.id}`);
+        if (generateImageBtn) {
+            generateImageBtn.addEventListener('click', () => {
+                this.generateImageWithAI(node);
+            });
+        }
+
+        const addImageFileBtn = document.getElementById(`add-image-file-btn-${node.id}`);
+        if (addImageFileBtn) {
+            addImageFileBtn.addEventListener('click', () => {
                 this.handleImageUpload(node);
             });
         }
@@ -1105,6 +1590,109 @@ class ComfyUIApp {
 
     hideContextMenu() {
         document.getElementById('context-menu').classList.add('hidden');
+    }
+
+    // Annotation Context Menu (Journals Mode)
+    showAnnotationContextMenu(x, y) {
+        const menu = document.getElementById('annotation-context-menu');
+        if (!menu) return;
+
+        // Show menu so we can measure its size
+        menu.classList.remove('hidden');
+
+        const menuRect = menu.getBoundingClientRect();
+        const menuWidth = menuRect.width;
+        const menuHeight = menuRect.height;
+
+        // Clamp position so the menu stays fully inside the viewport
+        const padding = 4;
+        const maxX = window.innerWidth - menuWidth - padding;
+        const maxY = window.innerHeight - menuHeight - padding;
+
+        const clampedX = Math.max(padding, Math.min(x, maxX));
+        const clampedY = Math.max(padding, Math.min(y, maxY));
+
+        menu.style.left = clampedX + 'px';
+        menu.style.top = clampedY + 'px';
+
+        // Add event listeners
+        menu.querySelectorAll('.context-menu-item').forEach(item => {
+            item.onclick = () => {
+                const action = item.dataset.action;
+                this.handleAnnotationContextMenuAction(action);
+                this.hideAnnotationContextMenu();
+            };
+        });
+    }
+
+    hideAnnotationContextMenu() {
+        const menu = document.getElementById('annotation-context-menu');
+        if (menu) menu.classList.add('hidden');
+    }
+
+    handleAnnotationContextMenuAction(action) {
+        const annotation = this.selectedAnnotationForContextMenu;
+        if (!annotation) return;
+
+        switch (action) {
+            case 'convert-to-thought':
+                this.convertAnnotationToNode(annotation, 'Thought');
+                break;
+            case 'convert-to-imagination':
+                this.convertAnnotationToNode(annotation, 'Imagination');
+                break;
+            case 'convert-to-belief':
+                this.convertAnnotationToNode(annotation, 'Belief');
+                break;
+            case 'edit-annotation':
+                if (annotation.type === 'text') {
+                    this.annotationManager.openTextEditor(annotation);
+                }
+                break;
+            case 'delete-annotation':
+                this.annotationManager.removeAnnotation(annotation);
+                this.canvasRenderer.render();
+                break;
+        }
+        this.selectedAnnotationForContextMenu = null;
+    }
+
+    convertAnnotationToNode(annotation, nodeType) {
+        // Get position from annotation
+        let x, y;
+        if (annotation.type === 'text') {
+            x = annotation.x;
+            y = annotation.y;
+        } else if (annotation.type === 'arrow') {
+            // Use midpoint of arrow
+            x = (annotation.startX + annotation.endX) / 2;
+            y = (annotation.startY + annotation.endY) / 2;
+        }
+
+        // Create the node
+        const node = new Node(nodeType, x, y);
+
+        // Transfer text content if available
+        if (annotation.type === 'text' && annotation.text) {
+            node.properties.text = annotation.text;
+        }
+
+        // Add to canvas
+        this.canvasRenderer.nodes.push(node);
+
+        // Remove the annotation
+        this.annotationManager.removeAnnotation(annotation);
+
+        // Re-render and update count
+        this.canvasRenderer.render();
+        this.updateNodeCount();
+
+        // Save to journal
+        if (typeof saveCurrentJournalCanvas === 'function') {
+            saveCurrentJournalCanvas();
+        }
+
+        this.workflowManager.showNotification(`Converted to ${nodeType} node`, 'success');
     }
 
     handleContextMenuAction(action) {
@@ -1368,55 +1956,690 @@ class ComfyUIApp {
         this.contextMenuWorkflowId = null;
     }
 
-    // Show smartwatch simulator in properties panel
+    // Start workflow simulation
     showSmartWatchSimulator() {
-        const propertiesContent = document.getElementById('properties-content');
-        if (!propertiesContent) return;
+        // If already in simulation mode, exit it
+        if (this.simulationMode) {
+            this.exitSimulation();
+            return;
+        }
 
-        // Store original content if not already stored
-        if (!this.originalPropertiesContent) {
+        // Validate workflow first
+        const errors = this.connectionManager.validateWorkflow(this.canvasRenderer.nodes);
+        const hasErrors = errors.some(e => e.type === 'error');
+
+        if (hasErrors) {
+            this.workflowManager.showNotification('Cannot simulate: Workflow has errors', 'error');
+            return;
+        }
+
+        if (this.canvasRenderer.nodes.length === 0) {
+            this.workflowManager.showNotification('Add nodes to simulate', 'warning');
+            return;
+        }
+
+        // Get nodes from selected flow only
+        let flowNodes = this.canvasRenderer.nodes;
+
+        if (this.canvasRenderer.selectedNodes.length > 0) {
+            // Use first selected node to find its connected flow
+            const startNode = this.canvasRenderer.selectedNodes[0];
+            flowNodes = this.connectionManager.getConnectedComponent(startNode, this.canvasRenderer.nodes);
+        }
+
+        // Get execution order for the selected flow
+        this.simulationNodes = this.connectionManager.getExecutionOrder(flowNodes);
+
+        if (this.simulationNodes.length === 0) {
+            this.workflowManager.showNotification('No connected nodes to simulate. Select a node in the flow first.', 'warning');
+            return;
+        }
+
+        // Enter simulation mode
+        this.simulationMode = true;
+        this.currentSimulationStep = 0;
+        document.body.classList.add('simulation-mode-active');
+
+        // Expand properties panel if collapsed, and sync body class
+        const propertiesPanel = document.getElementById('properties-panel');
+        if (propertiesPanel?.classList.contains('collapsed')) {
+            propertiesPanel.classList.remove('collapsed');
+            document.body.classList.remove('simulation-collapsed');
+        }
+
+        // Store original properties content
+        const propertiesContent = document.getElementById('properties-content');
+        if (propertiesContent && !this.originalPropertiesContent) {
             this.originalPropertiesContent = propertiesContent.innerHTML;
         }
 
-        // Replace properties panel with smartwatch simulator
+        // Rename Properties header
+        const propertiesHeader = document.querySelector('#properties-panel .sidebar-header h2');
+        if (propertiesHeader) propertiesHeader.textContent = 'Simulation';
+
+        // Render simulation panel
+        this.renderSimulationPanel();
+
+        // Update canvas to show highlights
+        this.updateSimulationHighlights();
+
+        // Check if first node needs AI generation
+        const firstNode = this.simulationNodes[0];
+        const aiDataSources = ['Generated by AI', 'Generated by the agent'];
+        if (firstNode && aiDataSources.includes(firstNode.properties?.dataSource) && !firstNode.properties.text) {
+            this.generateAIContentForNode(firstNode, 0);
+        }
+
+        // Resize canvas for wider panel
+        setTimeout(() => this.canvasRenderer.resizeCanvas(), 50);
+    }
+
+    // Render the simulation panel UI (mirrors chat tree structure)
+    renderSimulationPanel() {
+        const propertiesContent = document.getElementById('properties-content');
+        if (!propertiesContent) return;
+
         propertiesContent.innerHTML = `
-            <div class="smartwatch-simulator">
-                <div class="smartwatch-screen">
-                    <div class="smartwatch-content">
-                        <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                            <circle cx="12" cy="12" r="10"/>
-                            <polyline points="12 6 12 12 16 14"/>
-                        </svg>
-                        <p>Smartwatch Display</p>
-                        <p style="font-size: 12px; margin-top: 8px; opacity: 0.7;">Ready to connect</p>
+            <div class="simulation-panel-container">
+                <!-- Watch Screen Display -->
+                <div class="simulation-watch-screen">
+                    <div class="watch-header-controls">
+                        <div class="watch-playback">
+                            <button class="sim-ctrl-btn" id="simulation-exit-btn" title="Exit simulation">←</button>
+                            <button class="sim-ctrl-btn" id="simulation-reset-btn" title="Reset to start">⟲</button>
+                            <span class="sim-step-counter">${this.currentSimulationStep + 1}/${this.simulationNodes.length}</span>
+                            <button class="sim-ctrl-btn primary ${this.currentSimulationStep >= this.simulationNodes.length - 1 ? 'done' : ''}" id="simulation-next-btn">
+                                ${this.currentSimulationStep >= this.simulationNodes.length - 1 ? '✓' : '▶'}
+                            </button>
+                        </div>
+                        <div class="watch-shape-toggle">
+                            <button class="shape-btn ${this.watchShape === 'round' ? 'active' : ''}" data-shape="round" title="Round watch">○</button>
+                            <button class="shape-btn ${this.watchShape === 'square' ? 'active' : ''}" data-shape="square" title="Square watch">□</button>
+                        </div>
+                    </div>
+                    <div class="watch-illustration ${this.watchShape}">
+                        <div class="watch-strap top"></div>
+                        <div class="watch-body">
+                            <div class="watch-button left"></div>
+                            <div class="watch-frame">
+                                <div class="watch-display" id="watch-lottie-container"></div>
+                                <div class="watch-text-content" id="watch-text-content"></div>
+                                <div class="watch-node-title" id="watch-node-title"></div>
+                            </div>
+                            <div class="watch-button right"></div>
+                        </div>
+                        <div class="watch-strap bottom"></div>
                     </div>
                 </div>
-                <button class="connect-btn" id="smartwatch-connect-btn">Connect</button>
+                <div class="simulation-conversation" id="simulation-conversation">
+                    ${this.renderSimulationNodes()}
+                </div>
             </div>
         `;
 
-        // Add event listener to connect button
-        const connectBtn = document.getElementById('smartwatch-connect-btn');
-        if (connectBtn) {
-            connectBtn.addEventListener('click', () => {
-                connectBtn.textContent = 'Connected ✓';
-                connectBtn.style.background = '#10b981';
-                connectBtn.disabled = true;
+        this.attachSimulationListeners();
+        this.updateWatchDisplay();
+    }
 
-                // Update smartwatch screen content
-                const smartwatchContent = document.querySelector('.smartwatch-content');
-                if (smartwatchContent) {
-                    smartwatchContent.innerHTML = `
-                        <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="1.5">
-                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-                            <polyline points="22 4 12 14.01 9 11.01"/>
-                        </svg>
-                        <p style="color: #10b981;">Connected</p>
-                        <p style="font-size: 12px; margin-top: 8px; opacity: 0.7;">Smartwatch is ready</p>
+    // Render the node tree items
+    renderSimulationNodes() {
+        return this.simulationNodes.map((node, index) => {
+            let statusClass = 'pending';
+            let statusIcon = '○';
+
+            // Check if node is currently generating
+            const isGenerating = this.generatingNodeIds?.includes(node.id);
+
+            if (isGenerating) {
+                statusClass = 'generating';
+                statusIcon = '⟳';
+            } else if (index < this.currentSimulationStep) {
+                statusClass = 'completed';
+                statusIcon = '✓';
+            } else if (index === this.currentSimulationStep) {
+                statusClass = 'executing';
+                statusIcon = '●';
+            }
+
+            const nodeTitle = node.title || node.type;
+            const nodeInfo = this.getNodeDisplayInfo(node);
+            const dataSource = node.properties?.dataSource || '';
+            const showAIBadge = dataSource === 'Generated by AI' || dataSource === 'Generated by the agent';
+
+            return `
+                <div class="simulation-node ${statusClass}" data-node-id="${node.id}" data-index="${index}">
+                    <div class="simulation-node-header">
+                        <span class="simulation-node-title">${nodeTitle}${showAIBadge ? ' <span class="ai-badge">AI</span>' : ''}</span>
+                        <span class="simulation-node-status">${statusIcon}</span>
+                    </div>
+                </div>
+                ${index < this.simulationNodes.length - 1 ? '<div class="simulation-node-connector">│</div>' : ''}
+            `;
+        }).join('');
+    }
+
+    // Get display info for a node (full text, no truncation)
+    getNodeDisplayInfo(node) {
+        if (node.properties) {
+            if (node.properties.text) {
+                return node.properties.text;
+            }
+            if (node.properties.checkpoint_name) return node.properties.checkpoint_name;
+            if (node.properties.prompt) {
+                return node.properties.prompt;
+            }
+        }
+        return '';
+    }
+
+    // Attach event listeners for simulation panel
+    attachSimulationListeners() {
+        // Detach any existing listeners first to prevent stacking
+        this.detachSimulationListeners();
+
+        // Create new AbortController for this set of listeners
+        this.simulationAbortController = new AbortController();
+        const signal = this.simulationAbortController.signal;
+
+        document.getElementById('simulation-next-btn')?.addEventListener('click', () => {
+            this.nextSimulationStep();
+        }, { signal });
+
+        document.getElementById('simulation-reset-btn')?.addEventListener('click', () => {
+            this.resetSimulation();
+        }, { signal });
+
+        document.getElementById('simulation-exit-btn')?.addEventListener('click', () => {
+            this.exitSimulation();
+        }, { signal });
+
+        // Click on node to jump to that step
+        document.querySelectorAll('.simulation-node').forEach(el => {
+            el.addEventListener('click', () => {
+                const index = parseInt(el.dataset.index);
+                if (!isNaN(index)) {
+                    this.jumpToSimulationStep(index);
+                }
+            }, { signal });
+        });
+
+        // Watch shape toggle
+        document.querySelectorAll('.shape-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const shape = btn.dataset.shape;
+                if (shape && shape !== this.watchShape) {
+                    this.setWatchShape(shape);
+                }
+            }, { signal });
+        });
+    }
+
+    // Detach simulation event listeners to prevent stacking
+    detachSimulationListeners() {
+        if (this.simulationAbortController) {
+            this.simulationAbortController.abort();
+            this.simulationAbortController = null;
+        }
+    }
+
+    // Set watch shape and persist to localStorage
+    setWatchShape(shape) {
+        this.watchShape = shape;
+        localStorage.setItem('idea-engine-watch-shape', shape);
+        this.renderSimulationPanel();
+    }
+
+    // Animate "Generating..." dots
+    startGeneratingDotsAnimation(element) {
+        if (!element) return;
+        if (this.generatingDotsIntervalId) {
+            clearInterval(this.generatingDotsIntervalId);
+        }
+        let dots = 0;
+        this.generatingDotsIntervalId = setInterval(() => {
+            dots = (dots + 1) % 4;
+            element.textContent = 'Generating' + '.'.repeat(dots);
+        }, 400);
+    }
+
+    // Stop generating dots animation
+    stopGeneratingDotsAnimation() {
+        if (this.generatingDotsIntervalId) {
+            clearInterval(this.generatingDotsIntervalId);
+            this.generatingDotsIntervalId = null;
+        }
+    }
+
+    // Cancel any ongoing watch display effects
+    cancelWatchDisplayEffects() {
+        if (this.typewriterIntervalId) {
+            clearInterval(this.typewriterIntervalId);
+            this.typewriterIntervalId = null;
+        }
+        if (this.watchDisplayTimeoutId) {
+            clearTimeout(this.watchDisplayTimeoutId);
+            this.watchDisplayTimeoutId = null;
+        }
+        this.stopGeneratingDotsAnimation();
+        this.watchDisplayVersion = (this.watchDisplayVersion || 0) + 1;
+    }
+
+    // Typewriter effect for displaying text character by character
+    typewriterEffect(text, element, speed = 25) {
+        return new Promise((resolve) => {
+            element.textContent = '';
+            let i = 0;
+            this.typewriterIntervalId = setInterval(() => {
+                if (i < text.length) {
+                    element.textContent += text[i];
+                    i++;
+                } else {
+                    clearInterval(this.typewriterIntervalId);
+                    this.typewriterIntervalId = null;
+                    resolve();
+                }
+            }, speed);
+        });
+    }
+
+    // Update the watch display with current node's animation, title, and text
+    async updateWatchDisplay() {
+        // Cancel any previous effects
+        this.cancelWatchDisplayEffects();
+        const currentVersion = this.watchDisplayVersion;
+
+        const currentNode = this.simulationNodes[this.currentSimulationStep];
+        if (!currentNode) return;
+
+        // Check if this node is generating AI content
+        const isGeneratingAI = this.generatingNodeIds?.includes(currentNode.id);
+        const aiSources = ['Generated by AI', 'Generated by the agent'];
+        const needsAIGeneration = aiSources.includes(currentNode.properties?.dataSource) && !currentNode.properties?.text;
+        const isGenerating = isGeneratingAI || needsAIGeneration;
+
+        // Update title - always show it (including for Agent nodes)
+        const titleEl = document.getElementById('watch-node-title');
+        if (titleEl) {
+            titleEl.style.display = '';
+            titleEl.textContent = currentNode.title || currentNode.type;
+        }
+
+        // Add/remove glow effect on watch frame during generation
+        const watchFrame = document.querySelector('.watch-frame');
+        if (watchFrame) {
+            if (isGenerating) {
+                watchFrame.classList.add('generating-glow');
+            } else {
+                watchFrame.classList.remove('generating-glow');
+            }
+        }
+
+        // Load Lottie animation or Agent image
+        const lottieContainer = document.getElementById('watch-lottie-container');
+        const textContainer = document.getElementById('watch-text-content');
+
+        if (lottieContainer) {
+            // Clear previous animation
+            lottieContainer.innerHTML = '';
+
+            // Check if this is an Agent node - show image and heroType
+            if (currentNode.type === 'Agent') {
+                const imageValue = currentNode.properties?.image || '';
+                const hasValidImage = imageValue.startsWith('data:') || imageValue.startsWith('http://') || imageValue.startsWith('https://');
+                const heroType = currentNode.properties?.heroType || 'Hero';
+
+                if (hasValidImage) {
+                    lottieContainer.innerHTML = `
+                        <div class="watch-agent-display">
+                            <img src="${imageValue}" class="watch-agent-image" alt="Agent">
+                            <span class="watch-hero-badge ${heroType.toLowerCase()}">${heroType}</span>
+                        </div>
+                    `;
+                } else {
+                    lottieContainer.innerHTML = `
+                        <div class="watch-agent-display">
+                            <div class="watch-fallback-icon">A</div>
+                            <span class="watch-hero-badge ${heroType.toLowerCase()}">${heroType}</span>
+                        </div>
                     `;
                 }
-            });
+            } else if (typeof lottie !== 'undefined') {
+                // Get animation path for this node type
+                const animPath = this.canvasRenderer.nodeAnimationPaths[currentNode.type];
+                if (animPath) {
+                    this.watchLottieAnimation = lottie.loadAnimation({
+                        container: lottieContainer,
+                        renderer: 'svg',
+                        loop: true,
+                        autoplay: true,
+                        path: animPath
+                    });
+                } else {
+                    lottieContainer.innerHTML = `<div class="watch-fallback-icon">${currentNode.type.charAt(0)}</div>`;
+                }
+            } else {
+                lottieContainer.innerHTML = `<div class="watch-fallback-icon">${currentNode.type.charAt(0)}</div>`;
+            }
         }
+
+        // Show text with typewriter effect after 1 second delay
+        if (textContainer) {
+            // Check if this node type should be hidden from user
+            const hiddenNodeTypes = ['Terminal', 'Users input'];
+            const shouldHide = hiddenNodeTypes.includes(currentNode.type);
+
+            if (shouldHide) {
+                // Show "not visible" message for hidden node types
+                textContainer.textContent = 'This node is not visible for the user';
+                textContainer.classList.add('visible', 'hidden-node-message');
+            } else {
+                // Remove hidden message class
+                textContainer.classList.remove('hidden-node-message');
+
+                const nodeText = currentNode.properties?.text || '';
+
+                if (isGenerating) {
+                    // During generation - hide text, just show glow effect
+                    textContainer.textContent = '';
+                    textContainer.classList.remove('visible', 'generating-message');
+                } else if (nodeText) {
+                    // Clear and hide first
+                    textContainer.textContent = '';
+                    textContainer.classList.remove('visible', 'generating-message');
+
+                    // Wait 1 second for Lottie animation to play
+                    await new Promise(r => {
+                        this.watchDisplayTimeoutId = setTimeout(r, 1000);
+                    });
+
+                    // Check if we're still the current version (not cancelled)
+                    if (this.watchDisplayVersion !== currentVersion) return;
+
+                    // Show container and start typewriter
+                    textContainer.classList.add('visible');
+                    await this.typewriterEffect(nodeText, textContainer, 25);
+                } else {
+                    // No text - hide container
+                    textContainer.classList.remove('visible', 'generating-message');
+                    textContainer.textContent = '';
+                }
+            }
+        }
+    }
+
+    // Move to next simulation step (async to handle AI generation)
+    async nextSimulationStep() {
+        // Prevent multiple calls while animating
+        if (this.isAnimatingStep) return;
+
+        if (this.currentSimulationStep >= this.simulationNodes.length - 1) {
+            // Simulation complete
+            this.workflowManager.showNotification('Simulation complete!', 'success');
+            return;
+        }
+
+        this.isAnimatingStep = true;
+
+        const nextIndex = this.currentSimulationStep + 1;
+        const nextNode = this.simulationNodes[nextIndex];
+        const currentNode = this.simulationNodes[this.currentSimulationStep];
+
+        // Check if next node needs AI generation
+        const aiDataSourceValues = ['Generated by AI', 'Generated by the agent'];
+        const needsAIGeneration = nextNode.properties && aiDataSourceValues.includes(nextNode.properties.dataSource);
+
+        // Immediately increment step and show next node
+        this.currentSimulationStep++;
+        this.renderSimulationPanel();
+        this.updateSimulationHighlights();
+
+        // Animate data flow (visual only, doesn't block)
+        this.animateDataFlow(currentNode, nextNode, () => {
+            this.isAnimatingStep = false;
+        });
+
+        // If AI generation needed, generate in background and update watch when done
+        if (needsAIGeneration && !nextNode.properties.text) {
+            this.generateAIContentForNode(nextNode, nextIndex);
+        }
+    }
+
+    // Jump to a specific step
+    jumpToSimulationStep(stepIndex) {
+        if (stepIndex >= 0 && stepIndex < this.simulationNodes.length) {
+            this.currentSimulationStep = stepIndex;
+            this.renderSimulationPanel();
+            this.updateSimulationHighlights();
+        }
+    }
+
+    // Reset simulation to beginning
+    resetSimulation() {
+        this.currentSimulationStep = 0;
+        this.simulationParticles = [];
+        this.renderSimulationPanel();
+        this.updateSimulationHighlights();
+    }
+
+    // Exit simulation mode
+    exitSimulation() {
+        // Detach event listeners first
+        this.detachSimulationListeners();
+
+        // Cancel any ongoing watch display effects
+        this.cancelWatchDisplayEffects();
+
+        // Reset all simulation state
+        this.simulationMode = false;
+        this.currentSimulationStep = -1;
+        this.simulationNodes = [];
+        this.simulationParticles = [];
+        this.generatingNodeIds = [];
+        this.isGenerating = false;
+        this.isAnimatingStep = false;
+        this.showingPropertiesInSimulation = false;
+
+        // Cancel any running animation
+        if (this.simulationAnimationId) {
+            cancelAnimationFrame(this.simulationAnimationId);
+            this.simulationAnimationId = null;
+        }
+
+        // Remove body classes
+        document.body.classList.remove('simulation-mode-active');
+        document.body.classList.remove('simulation-collapsed');
+
+        // Restore properties panel
+        const propertiesContent = document.getElementById('properties-content');
+        if (propertiesContent && this.originalPropertiesContent) {
+            propertiesContent.innerHTML = this.originalPropertiesContent;
+        }
+
+        // Clear original content so it's freshly captured next time
+        this.originalPropertiesContent = null;
+
+        // Restore header
+        const propertiesHeader = document.querySelector('#properties-panel .sidebar-header h2');
+        if (propertiesHeader) propertiesHeader.textContent = 'Properties';
+
+        // Clear canvas highlights
+        this.canvasRenderer.executingNodeId = null;
+        this.canvasRenderer.completedNodeIds = [];
+        this.canvasRenderer.render();
+
+        // Resize canvas back
+        setTimeout(() => this.canvasRenderer.resizeCanvas(), 50);
+    }
+
+    // Update canvas node highlighting
+    updateSimulationHighlights() {
+        if (!this.simulationMode) return;
+
+        const completedIds = this.simulationNodes
+            .slice(0, this.currentSimulationStep)
+            .map(n => n.id);
+
+        const executingId = this.simulationNodes[this.currentSimulationStep]?.id || null;
+
+        this.canvasRenderer.completedNodeIds = completedIds;
+        this.canvasRenderer.executingNodeId = executingId;
+        this.canvasRenderer.render();
+
+        // Scroll to show executing node
+        if (executingId) {
+            const executingNode = this.simulationNodes[this.currentSimulationStep];
+            if (executingNode) {
+                // Pan canvas to center on executing node
+                this.canvasRenderer.centerOnNode(executingNode);
+            }
+        }
+    }
+
+    // Animate data flow between two nodes
+    animateDataFlow(fromNode, toNode, onComplete) {
+        // Find the connection between these nodes
+        const connection = this.connectionManager.connections.find(conn =>
+            conn.outputNode.id === fromNode.id && conn.inputNode.id === toNode.id
+        );
+
+        if (!connection) {
+            // No direct connection, just complete
+            if (onComplete) onComplete();
+            return;
+        }
+
+        // Create particle
+        const particle = {
+            progress: 0,
+            fromNode: fromNode,
+            toNode: toNode,
+            connection: connection,
+            speed: 0.08  // Faster animation (~200ms vs ~550ms)
+        };
+
+        this.simulationParticles.push(particle);
+
+        // Animate
+        const animate = () => {
+            particle.progress += particle.speed;
+
+            if (particle.progress >= 1) {
+                // Animation complete
+                this.simulationParticles = this.simulationParticles.filter(p => p !== particle);
+                this.canvasRenderer.render();
+                if (onComplete) onComplete();
+                return;
+            }
+
+            this.canvasRenderer.render();
+            this.simulationAnimationId = requestAnimationFrame(animate);
+        };
+
+        this.simulationAnimationId = requestAnimationFrame(animate);
+    }
+
+    // Generate AI content for a node during simulation
+    async generateAIContentForNode(node, nodeIndex) {
+        // Show loading state in panel
+        this.setNodeGeneratingState(node.id, true);
+
+        // Build context from all previous nodes in chain
+        const context = this.buildContextFromPreviousNodes(nodeIndex);
+
+        // Build prompt based on node type
+        const systemPrompt = `You are helping create content for a "${node.type}" node in a workflow.
+The workflow is building a narrative/presentation flow, like a slideshow where each slide builds on previous context.
+Based on the context provided, generate appropriate content for this ${node.type} node.
+Keep the response concise (2-4 sentences) and relevant to the node type.
+Do not include any prefixes like "Here is..." - just provide the content directly.`;
+
+        const userPrompt = `Context from previous nodes in the workflow:
+
+${context}
+
+Now generate content for this "${node.type}" node that logically follows and builds upon the above context.`;
+
+        try {
+            console.log('Calling API for node:', node.type);
+            console.log('Context:', context);
+
+            // Use the local proxy server at port 3000
+            const response = await fetch('http://localhost:3000/api/generate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    system: systemPrompt,
+                    prompt: userPrompt
+                })
+            });
+
+            console.log('API response status:', response.status);
+
+            if (!response.ok) {
+                throw new Error(`API error: ${response.status}`);
+            }
+
+            const data = await response.json();
+            console.log('API response data:', data);
+            const generatedText = data.content?.[0]?.text || 'No response generated';
+
+            // Update node's text property
+            node.properties.text = generatedText;
+
+            // Trigger canvas re-render to show updated content
+            this.canvasRenderer.render();
+
+            // Stop generating dots animation
+            this.stopGeneratingDotsAnimation();
+
+            // Update watch display to show the generated text
+            // Only if this node is still the current step
+            if (this.simulationNodes[this.currentSimulationStep]?.id === node.id) {
+                this.updateWatchDisplay();
+            }
+
+        } catch (error) {
+            console.error('AI generation failed:', error);
+            this.workflowManager.showNotification('AI generation failed: ' + error.message, 'error');
+        } finally {
+            this.setNodeGeneratingState(node.id, false);
+        }
+    }
+
+    // Build context from all previous nodes in the simulation chain
+    buildContextFromPreviousNodes(currentIndex) {
+        const contextParts = [];
+
+        for (let i = 0; i < currentIndex; i++) {
+            const node = this.simulationNodes[i];
+            const nodeText = node.properties?.text || '';
+            const dataSource = node.properties?.dataSource || 'Not defined';
+
+            if (nodeText.trim()) {
+                contextParts.push(`[${node.type}] (${dataSource}):
+${nodeText}`);
+            }
+        }
+
+        if (contextParts.length === 0) {
+            return 'No previous context available.';
+        }
+
+        return contextParts.join('\n\n---\n\n');
+    }
+
+    // Set generating state for a node
+    setNodeGeneratingState(nodeId, isGenerating) {
+        if (isGenerating) {
+            if (!this.generatingNodeIds.includes(nodeId)) {
+                this.generatingNodeIds.push(nodeId);
+            }
+        } else {
+            this.generatingNodeIds = this.generatingNodeIds.filter(id => id !== nodeId);
+        }
+        this.renderSimulationPanel();
     }
 
     // Show generation status message
@@ -1764,115 +2987,183 @@ Return ONLY the prompt text, no other formatting or explanation.`;
         fileInput.click();
     }
 
-    // ==================== WHOOP HEALTH DASHBOARD METHODS ====================
+    // Handle text file upload for Agent node prompt
+    handleTextFileUpload(node) {
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.txt,.md,.text';
+        fileInput.style.display = 'none';
 
-    // Show Whoop dashboard in properties panel
-    showWhoopDashboard() {
-        const propertiesContent = document.getElementById('properties-content');
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                if (file.size > 1 * 1024 * 1024) {
+                    alert('Text file is too large. Please select a file smaller than 1MB.');
+                    return;
+                }
 
-        // Store original content if not already stored
-        if (!this.isWhoopViewActive) {
-            this.originalPropertiesContent = propertiesContent.innerHTML;
-        }
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    node.properties.text = event.target.result;
+                    this.updatePropertiesPanel(node);
+                    this.canvasRenderer.render();
+                    this.workflowManager.markDirty();
+                };
+                reader.onerror = () => {
+                    alert('Error reading text file.');
+                };
+                reader.readAsText(file);
+            }
+        });
 
-        this.isWhoopViewActive = true;
-
-        // Generate Whoop UI
-        propertiesContent.innerHTML = this.generateWhoopUI();
-
-        // Attach event listeners
-        this.attachWhoopEventListeners();
+        fileInput.click();
     }
 
-    // Hide Whoop dashboard and restore properties panel
-    hideWhoopDashboard() {
+    // Generate image with OpenAI gpt-image-1 model
+    async generateImageWithAI(node) {
+        const generateBtn = document.getElementById(`generate-image-btn-${node.id}`);
+        if (generateBtn) {
+            generateBtn.disabled = true;
+            generateBtn.innerHTML = `⏳ Generating...`;
+        }
+
+        try {
+            // Get prompt from node's text property or heroType
+            let promptText = node.properties.text || '';
+            const heroType = node.properties.heroType || 'Hero';
+
+            if (!promptText.trim()) {
+                promptText = `A portrait of a ${heroType} character, professional digital art style, detailed face, dramatic lighting`;
+            } else {
+                promptText = `Portrait of ${heroType}: ${promptText}. Professional digital art style, detailed face, dramatic lighting`;
+            }
+
+            const OPENAI_API_KEY = localStorage.getItem('openai-api-key') || '';
+
+            const response = await fetch('https://api.openai.com/v1/images/generations', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${OPENAI_API_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: 'gpt-image-1',
+                    prompt: promptText,
+                    n: 1,
+                    size: '1024x1024'
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error?.message || `API error: ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            // gpt-image-1 returns b64_json directly (not a URL)
+            const base64Data = data.data[0].b64_json;
+            const base64Image = `data:image/png;base64,${base64Data}`;
+
+            // Update the node's image property with the base64 data URL
+            node.properties.image = base64Image;
+
+            // Refresh the properties panel to show the new image in the sphere
+            this.updatePropertiesPanel(node);
+
+            // Defer canvas render to allow browser to process the image without blocking
+            setTimeout(() => {
+                this.canvasRenderer.render();
+            }, 100);
+
+            if (this.workflowManager) {
+                this.workflowManager.markDirty();
+            }
+
+        } catch (error) {
+            console.error('Image Generation Error:', error);
+            alert(`Error generating image: ${error.message}`);
+        }
+    }
+
+    // ==================== PROFILE DASHBOARD METHODS ====================
+
+    showProfileDashboard() {
+        const propertiesContent = document.getElementById('properties-content');
+        if (!this.isProfileViewActive) {
+            this.originalPropertiesContent = propertiesContent.innerHTML;
+        }
+        this.isProfileViewActive = true;
+        propertiesContent.innerHTML = this.generateProfileUI();
+        this.attachProfileEventListeners();
+    }
+
+    hideProfileDashboard() {
         const propertiesContent = document.getElementById('properties-content');
         if (this.originalPropertiesContent) {
             propertiesContent.innerHTML = this.originalPropertiesContent;
         }
-        this.isWhoopViewActive = false;
+        this.isProfileViewActive = false;
     }
 
-    // Generate complete Whoop UI HTML
-    generateWhoopUI() {
+    generateProfileUI() {
+        const data = this.profileData;
+        const truncatedAddress = `${data.address.slice(0, 6)}...${data.address.slice(-4)}`;
+
         return `
-            <div class="whoop-container">
-                <!-- Custom Header Bar (redesign) -->
-                <div class="whoop-custom-header">
-                    <!-- Left: Profile + Flame -->
-                    <div class="header-left">
-                        <div class="profile-icon-small" id="header-profile">
-                            <img src="https://images.unsplash.com/photo-1568602471122-7832951cc4c5?ixlib=rb-1.2.1&auto=format&fit=crop&w=100&q=80" alt="Profile">
-                        </div>
-                        <div class="flame-badge">
-                            <svg class="flame-icon" viewBox="0 0 24 24">
-                                <path fill="url(#flameGradient)" d="M13.5 3C13.5 3 17 6 17 10C17 13.5 14.5 16 12 16C12 16 14.5 13.5 14.5 11C14.5 11 11.5 12.5 11.5 15C11.5 17 12.5 17.5 13 17.5C12 20 9 21 7.5 21C5.5 21 4 19 4 16C4 11 8 7.5 13.5 3Z" />
-                                <path fill="url(#flameGradientInner)" d="M12 23a7.5 7.5 0 0 1-5.138-12.963C8.202 8.726 12 3 12 3s3.798 5.726 5.138 7.037A7.5 7.5 0 0 1 12 23z"/>
-                                <defs>
-                                    <linearGradient id="flameGradient" x1="0%" y1="100%" x2="0%" y2="0%">
-                                        <stop offset="0%" style="stop-color:#FF4D4D;stop-opacity:1" />
-                                        <stop offset="100%" style="stop-color:#FF9E4D;stop-opacity:1" />
-                                    </linearGradient>
-                                    <linearGradient id="flameGradientInner" x1="0%" y1="100%" x2="0%" y2="0%">
-                                        <stop offset="0%" style="stop-color:#FF2D2D;stop-opacity:1" />
-                                        <stop offset="100%" style="stop-color:#FF8E2D;stop-opacity:1" />
-                                    </linearGradient>
-                                </defs>
-                            </svg>
-                            <span class="flame-count">128</span>
-                        </div>
+            <div class="profile-dashboard">
+                <!-- Profile Header -->
+                <div class="profile-header">
+                    <div class="profile-avatar-large">
+                        <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <circle cx="12" cy="8" r="4"/>
+                            <path d="M4 20c0-4 4-6 8-6s8 2 8 6"/>
+                        </svg>
                     </div>
-
-                    <!-- Center: Navigation -->
-                    <div class="header-center">
-                        <div class="nav-pill-container">
-                            <button class="nav-arrow" id="header-prev">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
-                            </button>
-                            <button class="today-pill-btn" id="toggle-calendar">TODAY</button>
-                            <button class="nav-arrow" id="header-next">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
-                            </button>
-                        </div>
+                    <div class="profile-username">${data.username}</div>
+                    <div class="profile-address">
+                        <span class="address-text">${truncatedAddress}</span>
+                        <button class="copy-btn" id="copy-address" title="Copy address">Copy</button>
                     </div>
-
-                    <!-- Right: Battery + Watch -->
-                    <div class="header-right">
-                        <span class="percent-text">89%</span>
-                        <div class="watch-status-icon">
-                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                                <rect x="6" y="4" width="12" height="16" rx="4" ry="4"></rect>
-                                <line x1="6" y1="12" x2="18" y2="12"></line>
-                                <circle cx="18" cy="6" r="2" fill="#00d26a" stroke="none"></circle>
-                            </svg>
+                    <a href="#" class="profile-explorer-link">View on Explorer ↗</a>
+                    <div class="profile-stats">
+                        <div class="stat-item">
+                            <span class="stat-value">${data.followers}</span>
+                            <span class="stat-label">Followers</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value">${data.following}</span>
+                            <span class="stat-label">Following</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value">${data.created}</span>
+                            <span class="stat-label">Created</span>
                         </div>
                     </div>
                 </div>
 
-                <!-- Navigation tabs (Calendar and Profile removed) -->
-                <div class="whoop-nav">
-                    <button class="whoop-nav-btn active" data-view="today">Today</button>
-                    <button class="whoop-nav-btn" data-view="sleep">Analytics</button>
-                    <button class="whoop-nav-btn" data-view="strain">Multiplayer</button>
+                <!-- Profile Tabs -->
+                <div class="profile-tabs">
+                    <button class="profile-tab-btn" data-profile-tab="coins">Coins</button>
+                    <button class="profile-tab-btn active" data-profile-tab="balances">Balances</button>
+                    <button class="profile-tab-btn" data-profile-tab="feed">Feed</button>
                 </div>
 
-                <!-- View container -->
-                <div class="whoop-view-container" id="whoop-view">
-                    ${this.generateTodayView()}
+                <!-- Tab Content -->
+                <div class="profile-tabs-content">
+                    <div class="profile-tab-content" id="profile-tab-coins">
+                        ${this.generateCoinsView()}
+                    </div>
+                    <div class="profile-tab-content active" id="profile-tab-balances">
+                        ${this.generateBalancesView()}
+                    </div>
+                    <div class="profile-tab-content" id="profile-tab-feed">
+                        ${this.generateFeedView()}
+                    </div>
                 </div>
 
-                <!-- Calendar Popup Overlay (hidden by default) -->
-                <div class="calendar-popup-overlay hidden" id="calendar-overlay">
-                    ${this.generateCalendarPopup()}
-                </div>
-
-                <!-- Profile Popup Overlay (hidden by default) -->
-                <div class="profile-popup-overlay hidden" id="profile-overlay">
-                    ${this.generateProfilePopup()}
-                </div>
-
-                <!-- Close button -->
-                <button class="whoop-close-btn" id="close-whoop">
+                <!-- Close Button -->
+                <button class="profile-close-btn" id="close-profile">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"/>
                         <line x1="6" y1="6" x2="18" y2="18"/>
@@ -1883,569 +3174,234 @@ Return ONLY the prompt text, no other formatting or explanation.`;
         `;
     }
 
-    // Generate Today View (Dashboard)
-    generateTodayView() {
-        const data = this.whoopData.todayMetrics;
-        const recoveryColor = this.getRecoveryColor(data.recovery);
-        const strainGradient = this.getStrainGradient(data.strain);
-
+    generateCoinsView() {
+        const tokens = this.profileData.tokens;
         return `
-            <div class="whoop-today-view">
-                <!-- Recovery Circle -->
-                <div class="recovery-circle">
-                    <svg width="180" height="180">
-                        <circle cx="90" cy="90" r="75" fill="none" stroke="#2a2a2a" stroke-width="12"/>
-                        <circle cx="90" cy="90" r="75" fill="none" stroke="${recoveryColor}"
-                                stroke-width="12" stroke-dasharray="471"
-                                stroke-dashoffset="${471 - (471 * data.recovery / 100)}"
-                                stroke-linecap="round"/>
-                    </svg>
-                    <div class="recovery-score-text">
-                        <div class="recovery-score-value" style="color: ${recoveryColor};">${data.recovery}%</div>
-                        <div class="recovery-score-label">Creativity</div>
-                    </div>
-                </div>
-
-                <!-- Today's Stats -->
-                <div class="whoop-metric-card">
-                    <div class="whoop-metric-header">
-                        <span class="whoop-metric-title">Strain</span>
-                    </div>
-                    <div class="whoop-metric-value">
-                        ${data.strain.toFixed(1)}
-                        <span class="whoop-metric-unit">/ 21</span>
-                    </div>
-                    <div class="whoop-progress-bar">
-                        <div class="whoop-progress-fill" style="width: ${(data.strain / 21) * 100}%; background: ${strainGradient};"></div>
-                    </div>
-                </div>
-
-                <!-- Sleep Card -->
-                <div class="whoop-metric-card">
-                    <div class="whoop-metric-header">
-                        <span class="whoop-metric-title">Sleep</span>
-                    </div>
-                    <div class="whoop-metric-value">
-                        ${data.sleep.duration}
-                        <span class="whoop-metric-unit">hrs</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; margin-top: 12px;">
-                        <div>
-                            <div style="font-size: 11px; color: #888;">Quality</div>
-                            <div style="font-size: 18px; font-weight: 600;">${data.sleep.quality}%</div>
-                        </div>
-                        <div>
-                            <div style="font-size: 11px; color: #888;">helped people</div>
-                            <div style="font-size: 18px; font-weight: 600; color: #00d26a;">
-                                88
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- HRV & RHR -->
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                    <div class="whoop-metric-card">
-                        <div class="whoop-metric-title">HRV</div>
-                        <div class="whoop-metric-value" style="font-size: 28px;">${data.hrv}</div>
-                        <div style="font-size: 10px; color: #888; margin-top: 4px;">ms</div>
-                    </div>
-                    <div class="whoop-metric-card">
-                        <div class="whoop-metric-title">RHR</div>
-                        <div class="whoop-metric-value" style="font-size: 28px;">${data.rhr}</div>
-                        <div style="font-size: 10px; color: #888; margin-top: 4px;">bpm</div>
-                    </div>
-                </div>
+            <div class="profile-coins-view">
+                <div class="section-title">All Tokens</div>
+                ${tokens.map(token => this.generateTokenCard(token)).join('')}
             </div>
         `;
     }
 
-    // Generate Calendar Popup (without header bar - used as overlay)
-    generateCalendarPopup() {
-        const monthData = this.whoopData.monthlyData;
-        const today = new Date();
-        const currentDay = today.getDate();
-        const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
-        const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).getDay();
-        const monthName = today.toLocaleString('default', { month: 'long' }).toUpperCase();
-
-        // Calculate days with activity for highlighting
-        const highlightDays = [14, 15, 16, 20, 21]; // Example highlight days
+    generateBalancesView() {
+        const tokens = this.profileData.tokens.filter(t => t.type === 'Native Gas Token');
+        const holdings = this.profileData.holdings;
+        const otherTokens = this.profileData.tokens.filter(t => t.type !== 'Native Gas Token');
 
         return `
-            <div class="calendar-popup">
-                <!-- Month Header -->
-                <div class="calendar-popup-header">
-                    <button class="month-nav-btn" id="prev-month-popup">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="15 18 9 12 15 6"/>
-                        </svg>
-                    </button>
-                    <h3 class="calendar-month-title">${monthName}</h3>
-                    <button class="month-nav-btn" id="next-month-popup">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="9 18 15 12 9 6"/>
-                        </svg>
-                    </button>
+            <div class="profile-balances-view">
+                <div class="token-section">
+                    <div class="section-title">Native Tokens</div>
+                    ${tokens.map(token => this.generateTokenCard(token)).join('')}
                 </div>
-
-                <!-- Day Headers -->
-                <div class="calendar-popup-grid">
-                    ${['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'].map(day =>
-                        `<div class="calendar-day-header">${day}</div>`
-                    ).join('')}
-
-                    <!-- Empty cells before first day (adjusting for Monday start) -->
-                    ${Array((firstDay === 0 ? 6 : firstDay - 1)).fill('').map(() =>
-                        '<div class="calendar-day-cell empty"></div>'
-                    ).join('')}
-
-                    <!-- Calendar days -->
-                    ${Array.from({length: daysInMonth}, (_, i) => i + 1).map(day => {
-                        const dayData = monthData[day - 1];
-                        const isToday = day === currentDay;
-                        const isHighlighted = highlightDays.includes(day);
-                        const recoveryColor = dayData ? this.getRecoveryColor(dayData.recovery) : '#2a2a2a';
-
-                        return `
-                            <div class="calendar-day-cell ${isToday ? 'today' : ''} ${isHighlighted ? 'highlighted' : ''}"
-                                 data-date="${day}"
-                                 style="border-color: ${isHighlighted ? recoveryColor : 'transparent'};">
-                                <div class="calendar-day-num">${day}</div>
-                                ${isHighlighted ? `<div class="day-indicator" style="background: ${recoveryColor};"></div>` : ''}
-                            </div>
-                        `;
-                    }).join('')}
-                </div>
-
-                <!-- Recovery Indicators -->
-                <div class="calendar-indicators">
-                    <span class="indicator-badge green">+83%</span>
-                    <span class="indicator-badge yellow">+61%</span>
-                    <span class="indicator-badge red">60%</span>
-                </div>
-            </div>
-        `;
-    }
-
-    // Generate Profile Popup (for overlay)
-    generateProfilePopup() {
-        const user = this.whoopData.userData;
-
-        return `
-            <div class="profile-popup">
-                <h3 style="font-size: 18px; font-weight: 700; margin-bottom: 20px; text-align: center;">Profile</h3>
-
-                <!-- Profile Picture -->
-                <div style="text-align: center; margin-bottom: 24px;">
-                    <div class="whoop-profile-picture">
-                        ${user.profilePicture ?
-                            `<img src="${user.profilePicture}" alt="Profile">` :
-                            `<svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="#00d26a" stroke-width="1.5">
-                                <circle cx="12" cy="12" r="10"/>
-                                <circle cx="12" cy="10" r="3"/>
-                                <path d="M6.168 18.849A4 4 0 0 1 10 16h4a4 4 0 0 1 3.834 2.855"/>
-                            </svg>`
-                        }
+                ${otherTokens.length > 0 ? `
+                    <div class="token-section">
+                        <div class="section-title">Other Tokens</div>
+                        ${otherTokens.map(token => this.generateTokenCard(token)).join('')}
                     </div>
-                    <div class="whoop-profile-name">${user.name}</div>
-                </div>
-
-                <!-- Stats -->
-                <div class="whoop-metric-card">
-                    <div class="whoop-metric-title">Personal Info</div>
-                    <div style="margin-top: 12px;">
-                        <div class="whoop-info-row">
-                            <span class="whoop-info-label">Age</span>
-                            <span class="whoop-info-value">${user.age} years</span>
-                        </div>
-                        <div class="whoop-info-row">
-                            <span class="whoop-info-label">Weight</span>
-                            <span class="whoop-info-value">${user.weight} lbs</span>
-                        </div>
-                        <div class="whoop-info-row">
-                            <span class="whoop-info-label">Height</span>
-                            <span class="whoop-info-value">${Math.floor(user.height / 12)}' ${user.height % 12}"</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Goals -->
-                <div class="whoop-metric-card">
-                    <div class="whoop-metric-title">Goals</div>
-                    <div style="margin-top: 12px;">
-                        <div style="margin-bottom: 12px;">
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-                                <span style="font-size: 12px; color: #888;">Sleep Goal</span>
-                                <span style="font-size: 12px; font-weight: 600;">8.0 hrs</span>
-                            </div>
-                            <div class="whoop-progress-bar">
-                                <div class="whoop-progress-fill" style="width: 94%; background: #00d26a;"></div>
-                            </div>
-                        </div>
-                        <div>
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-                                <span style="font-size: 12px; color: #888;">Strain Goal</span>
-                                <span style="font-size: 12px; font-weight: 600;">15.0</span>
-                            </div>
-                            <div class="whoop-progress-bar">
-                                <div class="whoop-progress-fill" style="width: 97%; background: #ff9500;"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Settings Button -->
-                <button class="whoop-btn" onclick="alert('Edit profile functionality coming soon!')">
-                    Edit Profile
-                </button>
-            </div>
-        `;
-    }
-
-    // Generate Sleep View
-    generateSleepView() {
-        const sleepData = this.whoopData.todayMetrics.sleep;
-        const stages = this.whoopData.generateSleepStages();
-
-        return `
-            <div class="whoop-sleep-view">
-                <h3 style="font-size: 18px; font-weight: 700; margin-bottom: 20px; text-align: center;">AI multiplayer interactions</h3>
-
-                <!-- Sleep Duration -->
-                <div class="whoop-metric-card">
-                    <div class="whoop-metric-title">Total interactions</div>
-                    <div class="whoop-metric-value">33</div>
-                </div>
-
-                <!-- Sleep Stages Chart -->
-                <div class="whoop-metric-card">
-                    <div class="whoop-metric-title">Agents</div>
-                    <div class="sleep-stages-chart">
-                        ${stages.map(stage => `
-                            <div class="sleep-stage-bar"
-                                 style="height: ${stage.percentage}%; background: ${stage.color};"
-                                 title="${stage.type}: ${stage.duration} min">
-                            </div>
-                        `).join('')}
-                    </div>
-                    <div class="sleep-stage-legend">
-                        <div class="sleep-stage-legend-item">
-                            <div class="sleep-stage-legend-bar" style="background: #8b5cf6;"></div>
-                            <div class="sleep-stage-legend-label">Hero</div>
-                        </div>
-                        <div class="sleep-stage-legend-item">
-                            <div class="sleep-stage-legend-bar" style="background: #3b82f6;"></div>
-                            <div class="sleep-stage-legend-label">Mentor</div>
-                        </div>
-                        <div class="sleep-stage-legend-item">
-                            <div class="sleep-stage-legend-bar" style="background: #06b6d4;"></div>
-                            <div class="sleep-stage-legend-label">Villain</div>
-                        </div>
-                        <div class="sleep-stage-legend-item">
-                            <div class="sleep-stage-legend-bar" style="background: #ef4444;"></div>
-                            <div class="sleep-stage-legend-label">researcher</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Sleep Metrics Grid -->
-                <div class="whoop-stats-grid">
-                    <div class="whoop-metric-card">
-                        <div class="whoop-metric-title">sent</div>
-                        <div class="whoop-metric-value" style="font-size: 28px;">${sleepData.quality}</div>
-                    </div>
-                    <div class="whoop-metric-card">
-                        <div class="whoop-metric-title">received</div>
-                        <div class="whoop-metric-value" style="font-size: 28px; color: #00d26a;">
-                            88
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-
-    // Generate Strain View
-    generateStrainView() {
-        const strainData = this.whoopData.todayMetrics.strain;
-        const activities = this.whoopData.activities;
-        const strainColor = this.getStrainColor(strainData);
-
-        return `
-            <div class="whoop-strain-view">
-                <h3 style="font-size: 18px; font-weight: 700; margin-bottom: 20px; text-align: center;">Day Strain</h3>
-
-                <!-- Strain Circle -->
-                <div class="recovery-circle" style="width: 160px; height: 160px; margin: 20px auto;">
-                    <svg width="160" height="160">
-                        <circle cx="80" cy="80" r="65" fill="none" stroke="#2a2a2a" stroke-width="12"/>
-                        <circle cx="80" cy="80" r="65" fill="none" stroke="${strainColor}"
-                                stroke-width="12" stroke-dasharray="408"
-                                stroke-dashoffset="${408 - (408 * strainData / 21)}"
-                                stroke-linecap="round"/>
-                    </svg>
-                    <div class="recovery-score-text">
-                        <div class="recovery-score-value" style="color: ${strainColor};">${strainData.toFixed(1)}</div>
-                        <div class="recovery-score-label">Strain</div>
-                    </div>
-                </div>
-
-                <!-- Activities Timeline -->
-                <div class="whoop-metric-card">
-                    <div class="whoop-metric-title">Today's Activities</div>
-                    <div style="margin-top: 12px;">
-                        ${activities.map(activity => `
-                            <div class="whoop-activity-item">
-                                <div>
-                                    <div class="whoop-activity-name">${activity.name}</div>
-                                    <div class="whoop-activity-time">${activity.time}</div>
+                ` : ''}
+                ${holdings.length > 0 ? `
+                    <div class="token-section">
+                        <div class="section-title">Token Holdings</div>
+                        ${holdings.map(token => `
+                            <div class="token-card">
+                                <div class="token-icon token-icon-${token.symbol.toLowerCase()}">
+                                    <span>${token.symbol.charAt(0)}</span>
                                 </div>
-                                <div class="whoop-activity-strain">
-                                    <div class="whoop-activity-strain-value" style="color: ${this.getStrainColor(activity.strain)};">
-                                        ${activity.strain.toFixed(1)}
-                                    </div>
-                                    <div class="whoop-activity-strain-label">strain</div>
+                                <div class="token-info">
+                                    <div class="token-name">${token.name}</div>
+                                    <div class="token-symbol">${token.symbol}</div>
+                                </div>
+                                <div class="token-balance">
+                                    <div class="token-amount">${token.balance.toLocaleString()}</div>
+                                    <div class="token-unit">${token.symbol}</div>
                                 </div>
                             </div>
                         `).join('')}
                     </div>
-                </div>
-
-                <!-- Strain Zones -->
-                <div class="whoop-metric-card">
-                    <div class="whoop-metric-title">Time in Zones</div>
-                    <div style="margin-top: 12px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                            <span style="font-size: 12px; color: #888;">Light (0-10)</span>
-                            <span style="font-size: 14px; font-weight: 600;">15 min</span>
-                        </div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                            <span style="font-size: 12px; color: #888;">Moderate (10-14)</span>
-                            <span style="font-size: 14px; font-weight: 600;">45 min</span>
-                        </div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                            <span style="font-size: 12px; color: #888;">All Out (14-18)</span>
-                            <span style="font-size: 14px; font-weight: 600;">35 min</span>
-                        </div>
-                    </div>
-                </div>
+                ` : ''}
             </div>
         `;
     }
 
-    // Generate Profile View
-    generateProfileView() {
-        const user = this.whoopData.userData;
-
+    generateFeedView() {
         return `
-            <div class="whoop-profile-view">
-                <h3 style="font-size: 18px; font-weight: 700; margin-bottom: 20px; text-align: center;">Profile</h3>
-
-                <!-- Profile Picture -->
-                <div style="text-align: center; margin-bottom: 24px;">
-                    <div class="whoop-profile-picture">
-                        ${user.profilePicture ?
-                            `<img src="${user.profilePicture}" alt="Profile">` :
-                            `<svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="#00d26a" stroke-width="1.5">
-                                <circle cx="12" cy="12" r="10"/>
-                                <circle cx="12" cy="10" r="3"/>
-                                <path d="M6.168 18.849A4 4 0 0 1 10 16h4a4 4 0 0 1 3.834 2.855"/>
-                            </svg>`
-                        }
-                    </div>
-                    <div class="whoop-profile-name">${user.name}</div>
+            <div class="profile-feed-view">
+                <div class="feed-empty">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M19 20H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v1m2 13a2 2 0 0 1-2-2V7m2 13a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-2"/>
+                    </svg>
+                    <span>No activity yet</span>
                 </div>
-
-                <!-- Stats -->
-                <div class="whoop-metric-card">
-                    <div class="whoop-metric-title">Personal Info</div>
-                    <div style="margin-top: 12px;">
-                        <div class="whoop-info-row">
-                            <span class="whoop-info-label">Age</span>
-                            <span class="whoop-info-value">${user.age} years</span>
-                        </div>
-                        <div class="whoop-info-row">
-                            <span class="whoop-info-label">Weight</span>
-                            <span class="whoop-info-value">${user.weight} lbs</span>
-                        </div>
-                        <div class="whoop-info-row">
-                            <span class="whoop-info-label">Height</span>
-                            <span class="whoop-info-value">${Math.floor(user.height / 12)}' ${user.height % 12}"</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Goals -->
-                <div class="whoop-metric-card">
-                    <div class="whoop-metric-title">Goals</div>
-                    <div style="margin-top: 12px;">
-                        <div style="margin-bottom: 12px;">
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-                                <span style="font-size: 12px; color: #888;">Sleep Goal</span>
-                                <span style="font-size: 12px; font-weight: 600;">8.0 hrs</span>
-                            </div>
-                            <div class="whoop-progress-bar">
-                                <div class="whoop-progress-fill" style="width: 94%; background: #00d26a;"></div>
-                            </div>
-                        </div>
-                        <div>
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-                                <span style="font-size: 12px; color: #888;">Strain Goal</span>
-                                <span style="font-size: 12px; font-weight: 600;">15.0</span>
-                            </div>
-                            <div class="whoop-progress-bar">
-                                <div class="whoop-progress-fill" style="width: 97%; background: #ff9500;"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Settings Button -->
-                <button class="whoop-btn" onclick="alert('Edit profile functionality coming soon!')">
-                    Edit Profile
-                </button>
             </div>
         `;
     }
 
-    // Attach Whoop-specific event listeners
-    attachWhoopEventListeners() {
-        // Navigation buttons
-        document.querySelectorAll('.whoop-nav-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const view = e.target.dataset.view;
-                this.switchWhoopView(view);
+    generateTokenCard(token) {
+        const iconClass = `token-icon-${token.symbol.toLowerCase()}`;
+        return `
+            <div class="token-card">
+                <div class="token-icon ${iconClass}">
+                    <span>${token.symbol.charAt(0)}</span>
+                </div>
+                <div class="token-info">
+                    <div class="token-name">${token.name}</div>
+                    <div class="token-type">${token.type}</div>
+                </div>
+                <div class="token-balance">
+                    <div class="token-amount">${token.balance.toLocaleString()}</div>
+                    <div class="token-unit">${token.symbol}</div>
+                    ${token.usd ? `<div class="token-usd">$${token.usd.toLocaleString()}</div>` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    attachProfileEventListeners() {
+        // Tab switching
+        document.querySelectorAll('.profile-tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tabName = btn.dataset.profileTab;
+                this.switchProfileTab(tabName);
             });
         });
 
         // Close button
-        const closeBtn = document.getElementById('close-whoop');
+        const closeBtn = document.getElementById('close-profile');
         if (closeBtn) {
-            closeBtn.addEventListener('click', () => {
-                this.hideWhoopDashboard();
-            });
+            closeBtn.addEventListener('click', () => this.hideProfileDashboard());
         }
 
-        // TODAY text click to toggle calendar popup
-        const todayText = document.getElementById('toggle-calendar');
-        if (todayText) {
-            todayText.addEventListener('click', () => {
-                this.toggleCalendarPopup();
-            });
+        // Copy address
+        const copyBtn = document.getElementById('copy-address');
+        if (copyBtn) {
+            copyBtn.addEventListener('click', () => this.copyWalletAddress());
         }
-
-        // Calendar overlay click (close when clicking outside)
-        const calendarOverlay = document.getElementById('calendar-overlay');
-        if (calendarOverlay) {
-            calendarOverlay.addEventListener('click', (e) => {
-                // Close only if clicking on the overlay itself, not the popup
-                if (e.target === calendarOverlay) {
-                    this.toggleCalendarPopup();
-                }
-            });
-        }
-
-        // Profile icon click to toggle profile popup
-        const profileIcon = document.getElementById('header-profile');
-        if (profileIcon) {
-            profileIcon.addEventListener('click', () => {
-                this.toggleProfilePopup();
-            });
-        }
-
-        // Profile overlay click (close when clicking outside)
-        const profileOverlay = document.getElementById('profile-overlay');
-        if (profileOverlay) {
-            profileOverlay.addEventListener('click', (e) => {
-                // Close only if clicking on the overlay itself, not the popup
-                if (e.target === profileOverlay) {
-                    this.toggleProfilePopup();
-                }
-            });
-        }
-
-        // Calendar day clicks
-        document.querySelectorAll('.calendar-day-cell').forEach(day => {
-            day.addEventListener('click', (e) => {
-                const date = e.currentTarget.dataset.date;
-                if (date) {
-                    console.log('View details for:', date);
-                    // Future: Show detailed day view
-                }
-            });
-        });
     }
 
-    // Switch between Whoop views
-    switchWhoopView(viewName) {
-        // Update nav buttons
-        document.querySelectorAll('.whoop-nav-btn').forEach(btn => {
+    switchProfileTab(tabName) {
+        // Update buttons
+        document.querySelectorAll('.profile-tab-btn').forEach(btn => {
             btn.classList.remove('active');
         });
-        const activeBtn = document.querySelector(`[data-view="${viewName}"]`);
-        if (activeBtn) {
-            activeBtn.classList.add('active');
-        }
+        const activeBtn = document.querySelector(`[data-profile-tab="${tabName}"]`);
+        if (activeBtn) activeBtn.classList.add('active');
 
-        // Generate new view
-        const container = document.getElementById('whoop-view');
-        if (!container) return;
-
-        let html = '';
-        switch(viewName) {
-            case 'today':
-                html = this.generateTodayView();
-                break;
-            case 'sleep':
-                html = this.generateSleepView();
-                break;
-            case 'strain':
-                html = this.generateStrainView();
-                break;
-        }
-
-        container.innerHTML = html;
-        this.attachWhoopEventListeners();
+        // Update content
+        document.querySelectorAll('.profile-tab-content').forEach(content => {
+            content.classList.remove('active');
+        });
+        const activeContent = document.getElementById(`profile-tab-${tabName}`);
+        if (activeContent) activeContent.classList.add('active');
     }
 
-    // Toggle calendar popup overlay
-    toggleCalendarPopup() {
-        const overlay = document.getElementById('calendar-overlay');
-        if (overlay) {
-            overlay.classList.toggle('hidden');
-        }
+    copyWalletAddress() {
+        navigator.clipboard.writeText(this.profileData.address).then(() => {
+            const copyBtn = document.getElementById('copy-address');
+            if (copyBtn) {
+                const originalText = copyBtn.textContent;
+                copyBtn.textContent = 'Copied!';
+                setTimeout(() => {
+                    copyBtn.textContent = originalText;
+                }, 1500);
+            }
+        });
     }
 
-    // Toggle profile popup overlay
-    toggleProfilePopup() {
-        const overlay = document.getElementById('profile-overlay');
-        if (overlay) {
-            overlay.classList.toggle('hidden');
+    // ========== Profile & Smartwatch Connection ==========
+
+    toggleProfileConnection() {
+        this.isProfileConnected = !this.isProfileConnected;
+        localStorage.setItem('idea-engine-profile-connected', this.isProfileConnected.toString());
+        this.updateConnectionUI();
+
+        // If disconnecting profile, also disconnect smartwatch
+        if (!this.isProfileConnected && this.connectedSmartwatch) {
+            this.disconnectSmartwatch();
         }
     }
 
-    // Helper: Get recovery color
-    getRecoveryColor(recovery) {
-        if (recovery >= 67) return '#00d26a';  // Green
-        if (recovery >= 34) return '#ffd60a';  // Yellow
-        return '#ff3b30';                      // Red
+    updateConnectionUI() {
+        const connectBtn = document.getElementById('btn-profile-connect');
+        const smartwatchBtn = document.getElementById('btn-smartwatch');
+        const smartwatchStatus = smartwatchBtn?.querySelector('.smartwatch-status');
+
+        // Update profile connect button
+        if (connectBtn) {
+            if (this.isProfileConnected) {
+                connectBtn.classList.add('connected');
+                connectBtn.querySelector('.connect-text').textContent = 'Connected';
+            } else {
+                connectBtn.classList.remove('connected');
+                connectBtn.querySelector('.connect-text').textContent = 'Connect';
+            }
+        }
+
+        // Update smartwatch button state
+        if (smartwatchBtn) {
+            smartwatchBtn.disabled = !this.isProfileConnected;
+            smartwatchBtn.title = this.isProfileConnected
+                ? 'Connect Smartwatch'
+                : 'Connect profile first';
+        }
+
+        // Update smartwatch status
+        if (smartwatchStatus) {
+            if (this.connectedSmartwatch) {
+                const watch = this.availableSmartwatches.find(w => w.id === this.connectedSmartwatch);
+                smartwatchStatus.textContent = watch ? watch.name : 'Connected';
+                smartwatchStatus.classList.remove('disconnected');
+                smartwatchStatus.classList.add('connected');
+            } else {
+                smartwatchStatus.textContent = 'Disconnected';
+                smartwatchStatus.classList.remove('connected');
+                smartwatchStatus.classList.add('disconnected');
+            }
+        }
     }
 
-    // Helper: Get strain color
-    getStrainColor(strain) {
-        if (strain >= 18) return '#ff3b30';    // Very high
-        if (strain >= 14) return '#ff9500';    // High
-        if (strain >= 10) return '#ffd60a';    // Moderate
-        return '#00d26a';                       // Low
+    showSmartwatchSelector() {
+        const overlay = document.getElementById('smartwatch-selector-overlay');
+        const list = document.getElementById('smartwatch-selector-list');
+
+        // Populate smartwatch list
+        list.innerHTML = this.availableSmartwatches.map(watch => `
+            <div class="smartwatch-selector-item" data-watch-id="${watch.id}">
+                <div class="smartwatch-selector-item-icon">${watch.icon}</div>
+                <div class="smartwatch-selector-item-info">
+                    <div class="smartwatch-selector-item-name">${watch.name}</div>
+                    <div class="smartwatch-selector-item-brand">${watch.brand}</div>
+                </div>
+            </div>
+        `).join('');
+
+        // Attach click handlers
+        list.querySelectorAll('.smartwatch-selector-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const watchId = item.dataset.watchId;
+                this.connectSmartwatch(watchId);
+                this.hideSmartwatchSelector();
+            });
+        });
+
+        overlay.classList.remove('hidden');
     }
 
-    // Helper: Get strain gradient
-    getStrainGradient(strain) {
-        if (strain >= 18) return 'linear-gradient(90deg, #ff3b30, #ff6b6b)';
-        if (strain >= 14) return 'linear-gradient(90deg, #ff9500, #ffb84d)';
-        if (strain >= 10) return 'linear-gradient(90deg, #ffd60a, #ffe066)';
-        return 'linear-gradient(90deg, #00d26a, #1fdf64)';
+    hideSmartwatchSelector() {
+        document.getElementById('smartwatch-selector-overlay').classList.add('hidden');
+    }
+
+    connectSmartwatch(watchId) {
+        this.connectedSmartwatch = watchId;
+        localStorage.setItem('idea-engine-smartwatch', watchId);
+        this.updateConnectionUI();
+    }
+
+    disconnectSmartwatch() {
+        this.connectedSmartwatch = null;
+        localStorage.removeItem('idea-engine-smartwatch');
+        this.updateConnectionUI();
     }
 
     // ========== Node Text Editor (Journals Mode) ==========
@@ -2462,19 +3418,38 @@ Return ONLY the prompt text, no other formatting or explanation.`;
         document.getElementById('text-editor-node-type').textContent = node.type;
         document.getElementById('text-editor-node-type').style.color = node.color;
 
-        // Show Lottie animation for Thought nodes
+        // Lottie animations for Mind Inventory and Perception Graph nodes
+        const nodeAnimations = {
+            // Mind Inventory
+            'Thought': 'assets/Tetrahedron.json',
+            'Imagination': 'assets/Octahedron.json',
+            'Action': 'assets/Dodecahedron.json',
+            'Belief': 'assets/Icosahedron.json',
+            'Emotion': 'assets/Cube.json',
+            // Perception Graph
+            'Dreams': 'assets/dreams.json',
+            'Goals': 'assets/goals.json',
+            'Rules': 'assets/rules.json',
+            'Memories': 'assets/memories.json',
+            'Questions': 'assets/questions.json',
+            'Danger': 'assets/dangers.json',
+            'Expressions': 'assets/heart.json',
+            'Problem': 'assets/question.json',
+            'Instructions': 'assets/idea.json'
+        };
+
         const lottieContainer = document.getElementById('text-editor-lottie');
-        if (node.type === 'Thought' && typeof lottie !== 'undefined') {
+        const animationPath = nodeAnimations[node.type];
+
+        if (animationPath && typeof lottie !== 'undefined') {
             lottieContainer.classList.add('active');
-            // Clear any existing animation
             lottieContainer.innerHTML = '';
-            // Load the Octahedron animation
             this.textEditorLottie = lottie.loadAnimation({
                 container: lottieContainer,
                 renderer: 'svg',
                 loop: true,
                 autoplay: true,
-                path: 'assets/Octahedron.json'
+                path: animationPath
             });
         } else {
             lottieContainer.classList.remove('active');
@@ -2583,4 +3558,7 @@ Return ONLY the prompt text, no other formatting or explanation.`;
 document.addEventListener('DOMContentLoaded', () => {
     window.app = new ComfyUIApp();
     console.log('ComfyUI Clone initialized');
+
+    // Note: Lottie animation now only loads in Chat mode (gamification feature)
+    // No animation in Design Flow, Journals, or Agent modes
 });

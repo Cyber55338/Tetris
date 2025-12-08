@@ -54,18 +54,30 @@ class ConnectionManager {
         // Determine if multiple connections are allowed on this input
         // - Journals mode: all nodes can have multiple input connections
         // - Design Flow: utility nodes as SOURCE don't break existing connections
+        // - Terminal node: always accepts multiple input connections
         const isJournalMode = typeof journalMode !== 'undefined' && journalMode;
         const isUtilityNode = outputNode.category === 'utility';
-        const allowMultiple = isJournalMode || isUtilityNode;
+        const isTerminalInput = inputNode.type === 'Terminal';
+        const allowMultipleInputs = isJournalMode || isUtilityNode || isTerminalInput;
 
         // Check if input already has a connection
-        const existingConnection = this.connections.find(conn =>
+        const existingInputConnection = this.connections.find(conn =>
             conn.inputNode === inputNode && conn.inputIndex === inputIndex
         );
 
-        // Only remove existing connection if multiple connections NOT allowed
-        if (existingConnection && !allowMultiple) {
-            this.removeConnection(existingConnection);
+        // Only remove existing input connection if multiple connections NOT allowed
+        if (existingInputConnection && !allowMultipleInputs) {
+            this.removeConnection(existingInputConnection);
+        }
+
+        // Terminal OUTPUT can only connect to Agent nodes (but can have multiple Agent connections)
+        if (outputNode.type === 'Terminal') {
+            // Only allow connection to Agent node
+            if (inputNode.type !== 'Agent') {
+                console.warn('Terminal can only connect to Agent nodes');
+                return null;
+            }
+            // Multiple connections to Agent nodes are allowed - no removal of existing connections
         }
 
         // Create new connection
@@ -369,32 +381,67 @@ class ConnectionManager {
         return false;
     }
 
-    // Get execution order (topological sort)
+    // Get all nodes connected to a starting node (finds the connected flow/component)
+    getConnectedComponent(startNode, allNodes) {
+        const visited = new Set();
+        const component = [];
+
+        const traverse = (node) => {
+            if (visited.has(node.id)) return;
+            visited.add(node.id);
+            component.push(node);
+
+            // Find all connected nodes (both directions)
+            this.connections.forEach(conn => {
+                if (conn.outputNode.id === node.id) {
+                    const targetNode = allNodes.find(n => n.id === conn.inputNode.id);
+                    if (targetNode) traverse(targetNode);
+                }
+                if (conn.inputNode.id === node.id) {
+                    const targetNode = allNodes.find(n => n.id === conn.outputNode.id);
+                    if (targetNode) traverse(targetNode);
+                }
+            });
+        };
+
+        traverse(startNode);
+        return component;
+    }
+
+    // Get execution order (topological sort based on connection hierarchy)
     getExecutionOrder(nodes) {
+        if (nodes.length === 0) return [];
+
         const visited = new Set();
         const order = [];
 
-        const dfs = (node) => {
-            if (visited.has(node)) return;
-            visited.add(node);
+        // Build adjacency: for each node, find what nodes feed into it
+        // Uses this.connections as source of truth (not stale node.input.connection)
+        const getInputNodes = (node) => {
+            return this.connections
+                .filter(conn => conn.inputNode.id === node.id)
+                .map(conn => conn.outputNode);
+        };
 
-            // Visit all dependencies first (inputs)
-            node.inputs.forEach(input => {
-                if (input.connection) {
-                    const depNode = input.connection.outputNode;
-                    dfs(depNode);
-                }
-            });
+        // Check if node has any incoming connections
+        const hasIncomingConnections = (node) => {
+            return this.connections.some(conn => conn.inputNode.id === node.id);
+        };
+
+        const dfs = (node) => {
+            if (visited.has(node.id)) return;
+            visited.add(node.id);
+
+            // Visit all dependencies first (nodes that feed into this one)
+            const inputNodes = getInputNodes(node);
+            inputNodes.forEach(depNode => dfs(depNode));
 
             order.push(node);
         };
 
-        // Start from nodes with outputs but no inputs (source nodes)
-        nodes.forEach(node => {
-            if (node.outputs.length > 0) {
-                dfs(node);
-            }
-        });
+        // Run DFS from all nodes to ensure we catch everything
+        // The order is determined by connection hierarchy, not array order
+        nodes.forEach(node => dfs(node));
 
         return order;
     }

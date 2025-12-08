@@ -1,13 +1,14 @@
 // Chat Mode Module - Flux-style Conversational AI Tree Interface
 const CHAT_SESSIONS_KEY = 'idea-engine-chat-sessions';
 const CHAT_SETTINGS_KEY = 'idea-engine-chat-settings';
+const CHAT_GAMIFICATION_KEY = 'idea-engine-chat-gamification';
 
 let chatMode = false;
 let previousDesignFlowStateChat = null;
 let selectedChatNodeId = null;
 let chatSettings = {
     temperature: 0.7,
-    numResponses: 1
+    numResponses: 3
 };
 
 // Session management
@@ -15,10 +16,475 @@ let chatSessions = []; // Array of { id, title, nodes, connections, createdAt, u
 let currentSessionId = null;
 let contextMenuSessionId = null; // For right-click context menu
 
+// Gamification state
+let chatGamification = {
+    thinkingLevel: 0,       // Current display level (for current tree)
+    thinkingMode: 'initial', // 'initial' | 'divergent' | 'convergent'
+    streak: 0,              // Compose answer streak
+    totalComposes: 0,       // Total compose actions
+    lastComposeDate: null
+};
+
+// Track max level per tree (key = root SystemMessage node ID, value = max level reached)
+let treeLevels = {};
+
+// Track gold per tree (key = root node ID, value = { gold, lastThreshold })
+let treeGold = {};
+
+// ============ GAMIFICATION FUNCTIONS ============
+function loadGamification() {
+    try {
+        const stored = localStorage.getItem(CHAT_GAMIFICATION_KEY);
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            // Migration: convert old binary level to new structure
+            if (parsed.level !== undefined && parsed.thinkingMode === undefined) {
+                parsed.thinkingLevel = 0;
+                parsed.thinkingMode = 'initial';
+                delete parsed.level;
+            }
+            chatGamification = { ...chatGamification, ...parsed };
+        }
+    } catch (e) {
+        console.error('Failed to load gamification data:', e);
+    }
+}
+
+function saveGamification() {
+    try {
+        localStorage.setItem(CHAT_GAMIFICATION_KEY, JSON.stringify(chatGamification));
+    } catch (e) {
+        console.error('Failed to save gamification data:', e);
+    }
+}
+
+function showGamificationUI() {
+    const container = document.getElementById('chat-gamification');
+    if (container) {
+        container.classList.add('visible');
+        updateGamificationDisplay();
+    }
+}
+
+function hideGamificationUI() {
+    const container = document.getElementById('chat-gamification');
+    if (container) {
+        container.classList.remove('visible');
+    }
+}
+
+function updateGamificationDisplay() {
+    const labelEl = document.getElementById('thinking-label');
+    const levelEl = document.getElementById('thinking-level');
+
+    if (labelEl) {
+        // Three-state label: initial, divergent, convergent
+        switch (chatGamification.thinkingMode) {
+            case 'initial':
+                labelEl.textContent = 'Thinking';
+                break;
+            case 'divergent':
+                labelEl.textContent = 'Divergent Thinking';
+                break;
+            case 'convergent':
+                labelEl.textContent = 'Convergent Thinking';
+                break;
+            default:
+                labelEl.textContent = 'Thinking';
+        }
+    }
+    if (levelEl) {
+        const displayLevel = chatGamification.thinkingLevel || 0;
+        levelEl.textContent = displayLevel > 0 ? `Level ${displayLevel}` : '';
+        levelEl.classList.toggle('convergent', chatGamification.thinkingMode === 'convergent');
+    }
+}
+
+function incrementStreak() {
+    chatGamification.streak++;
+    chatGamification.totalComposes++;
+    chatGamification.lastComposeDate = new Date().toISOString();
+    updateGamificationDisplay();
+    saveGamification();
+}
+
+// Show "Level X Thinking" popup centered on canvas
+function showLevelUpOverlay(level) {
+    let overlay = document.getElementById('level-up-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'level-up-overlay';
+        overlay.className = 'level-up-overlay';
+        const canvasContainer = document.querySelector('.canvas-container');
+        if (canvasContainer) {
+            canvasContainer.appendChild(overlay);
+        }
+    }
+
+    overlay.innerHTML = `
+        <div class="level-up-text">Level ${level}</div>
+        <div class="level-up-subtext">Thinking</div>
+    `;
+
+    // Trigger animation
+    overlay.classList.remove('fade-out');
+    overlay.classList.add('visible');
+
+    // Fade out after 2 seconds
+    setTimeout(() => {
+        overlay.classList.add('fade-out');
+        setTimeout(() => {
+            overlay.classList.remove('visible', 'fade-out');
+        }, 500);
+    }, 2000);
+}
+
+// Transition to divergent thinking mode (on 2+ response generation)
+// Now tracks per-tree and shows level-up only when NEW level is reached for that tree
+function transitionToDivergentThinking() {
+    if (!selectedChatNodeId) return;
+
+    const rootId = getTreeRootId(selectedChatNodeId);
+    if (!rootId) return;
+
+    // Calculate what level we're at now (based on current lineage position)
+    const lineage = getNodeLineage(selectedChatNodeId);
+    const currentPositionLevel = lineage.filter(n =>
+        n.type === 'UserMessage' && n.properties?.text?.trim()
+    ).length;
+
+    // Get the tree's current max level
+    const previousMaxLevel = getTreeLevel(rootId);
+
+    // If this is a NEW level for this tree, celebrate!
+    if (currentPositionLevel > previousMaxLevel) {
+        // Update the tree's max level
+        updateTreeLevel(rootId, currentPositionLevel);
+
+        // Show level-up overlay first
+        showLevelUpOverlay(currentPositionLevel);
+
+        // Check for gold reward AFTER level popup finishes (2.5s delay)
+        setTimeout(() => {
+            checkAndAwardGold(rootId, currentPositionLevel);
+        }, 2600);
+    }
+
+    // Always update display to divergent mode
+    chatGamification.thinkingLevel = getTreeLevel(rootId);
+    chatGamification.thinkingMode = 'divergent';
+    updateGamificationDisplay();
+    updateRewardBarDisplay();
+    saveGamification();
+}
+
+// Transition to convergent thinking mode (on compose)
+function transitionToConvergentThinking() {
+    chatGamification.thinkingMode = 'convergent';
+    updateGamificationDisplay();
+    saveGamification();
+}
+
+// Initialize thinking state for new trees/sessions
+function initializeThinkingState() {
+    chatGamification.thinkingMode = 'initial';
+    chatGamification.thinkingLevel = 0;
+    updateGamificationDisplay();
+    saveGamification();
+}
+
+// Get root node (SystemMessage) of a tree from any node in the lineage
+function getTreeRootId(nodeId) {
+    if (!nodeId) return null;
+    const lineage = getNodeLineage(nodeId);
+    if (lineage.length === 0) return null;
+    // Root is the first node in lineage (should be SystemMessage)
+    return lineage[0].id;
+}
+
+// Calculate the full tree level by finding the deepest path from root
+// Level = count of compose cycles (user messages with content after first)
+function calculateTreeMaxLevel(rootId) {
+    if (!rootId || !app?.canvasRenderer) return 0;
+
+    // Find all nodes connected to this tree
+    const allNodes = app.canvasRenderer.nodes;
+    const connections = app.connectionManager.connections;
+
+    // BFS/DFS to find all UserMessage nodes in this tree
+    const visited = new Set();
+    const queue = [rootId];
+    let maxUserMessages = 0;
+
+    // For each leaf, count user messages in its lineage
+    while (queue.length > 0) {
+        const currentId = queue.shift();
+        if (visited.has(currentId)) continue;
+        visited.add(currentId);
+
+        // Find children (nodes where this is the output)
+        const children = connections
+            .filter(c => c.outputNode.id === currentId)
+            .map(c => c.inputNode.id);
+
+        if (children.length === 0) {
+            // This is a leaf - count user messages in its lineage
+            const lineage = getNodeLineage(currentId);
+            const userMsgCount = lineage.filter(n =>
+                n.type === 'UserMessage' && n.properties?.text?.trim()
+            ).length;
+            maxUserMessages = Math.max(maxUserMessages, userMsgCount);
+        } else {
+            children.forEach(childId => queue.push(childId));
+        }
+    }
+
+    return maxUserMessages;
+}
+
+// Get or calculate max level for a tree
+function getTreeLevel(rootId) {
+    if (!rootId) return 0;
+    // If we have a stored max, use it; otherwise calculate
+    if (treeLevels[rootId] !== undefined) {
+        return treeLevels[rootId];
+    }
+    // Calculate from tree structure
+    const calculated = calculateTreeMaxLevel(rootId);
+    treeLevels[rootId] = calculated;
+    return calculated;
+}
+
+// Update tree level (only increases, never decreases)
+function updateTreeLevel(rootId, newLevel) {
+    if (!rootId) return;
+    const currentMax = treeLevels[rootId] || 0;
+    if (newLevel > currentMax) {
+        treeLevels[rootId] = newLevel;
+        // Save to session
+        saveTreeLevels();
+    }
+}
+
+// Save tree levels to current session
+function saveTreeLevels() {
+    if (!currentSessionId) return;
+    const session = chatSessions.find(s => s.id === currentSessionId);
+    if (session) {
+        session.treeLevels = { ...treeLevels };
+        saveChatSessions();
+    }
+}
+
+// Load tree levels from session
+function loadTreeLevels(session) {
+    if (session && session.treeLevels) {
+        treeLevels = { ...session.treeLevels };
+    } else {
+        treeLevels = {};
+    }
+}
+
+// Helper to update level display for current tree (shows max level, never goes down)
+function updateLevelForCurrentTree() {
+    if (!selectedChatNodeId) {
+        chatGamification.thinkingLevel = 0;
+        chatGamification.thinkingMode = 'initial';
+    } else {
+        const rootId = getTreeRootId(selectedChatNodeId);
+        const maxLevel = getTreeLevel(rootId);
+        chatGamification.thinkingLevel = maxLevel;
+        chatGamification.thinkingMode = maxLevel > 0 ? 'divergent' : 'initial';
+    }
+    updateGamificationDisplay();
+    updateRewardBarDisplay();
+}
+
+// ============ GOLD REWARD SYSTEM ============
+
+// Calculate next gold threshold based on current level
+function getNextThreshold(level) {
+    if (level < 100) {
+        return Math.ceil((level + 1) / 10) * 10;  // 10, 20, 30... 100
+    } else {
+        return Math.ceil((level + 1) / 100) * 100;  // 200, 300... 1000
+    }
+}
+
+// Calculate previous threshold (for progress bar calculation)
+function getPreviousThreshold(level) {
+    if (level < 10) return 0;
+    if (level <= 100) return Math.floor(level / 10) * 10;
+    return Math.floor(level / 100) * 100;
+}
+
+// Get gold data for a tree
+function getTreeGold(rootId) {
+    if (!rootId) return { gold: 0, lastThreshold: 0 };
+    return treeGold[rootId] || { gold: 0, lastThreshold: 0 };
+}
+
+// Save tree gold to session
+function saveTreeGold() {
+    if (!currentSessionId) return;
+    const session = chatSessions.find(s => s.id === currentSessionId);
+    if (session) {
+        session.treeGold = { ...treeGold };
+        saveChatSessions();
+    }
+}
+
+// Load tree gold from session
+function loadTreeGold(session) {
+    if (session && session.treeGold) {
+        treeGold = { ...session.treeGold };
+    } else {
+        treeGold = {};
+    }
+}
+
+// Update reward bar display based on current tree's level
+function updateRewardBarDisplay() {
+    const fillEl = document.getElementById('reward-bar-fill');
+    const iconEl = document.getElementById('reward-bar-icon');
+    const textEl = document.getElementById('reward-bar-text');
+    const goldEl = document.getElementById('reward-bar-gold');
+    if (!fillEl || !iconEl) return;
+
+    const rootId = getTreeRootId(selectedChatNodeId);
+    const level = getTreeLevel(rootId);
+
+    const prevThreshold = getPreviousThreshold(level);
+    const nextThreshold = getNextThreshold(level);
+    const range = nextThreshold - prevThreshold;
+    const progress = range > 0 ? ((level - prevThreshold) / range) * 100 : 0;
+
+    fillEl.style.width = `${Math.min(progress, 100)}%`;
+
+    // Update progress text (e.g., "5/10 levels")
+    if (textEl) {
+        textEl.textContent = `${level}/${nextThreshold} levels`;
+    }
+
+    // Update gold amount display
+    const goldAmount = nextThreshold <= 100 ? 100 : 1000;
+    if (goldEl) {
+        goldEl.textContent = `+${goldAmount}`;
+    }
+
+    // Show chest when at a threshold level
+    const isAtThreshold = (level > 0 && level <= 100 && level % 10 === 0) ||
+                          (level > 100 && level % 100 === 0);
+
+    if (isAtThreshold) {
+        iconEl.textContent = '📦';
+        iconEl.classList.add('chest');
+        fillEl.classList.add('full');
+    } else {
+        iconEl.textContent = '🪙';
+        iconEl.classList.remove('chest');
+        fillEl.classList.remove('full');
+    }
+}
+
+// Show gold reward popup on canvas
+function showGoldRewardOverlay(gold) {
+    let overlay = document.getElementById('gold-reward-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'gold-reward-overlay';
+        overlay.className = 'gold-reward-overlay';
+        const canvasContainer = document.querySelector('.canvas-container');
+        if (canvasContainer) {
+            canvasContainer.appendChild(overlay);
+        }
+    }
+
+    overlay.innerHTML = `
+        <div class="gold-reward-text">+${gold} 🪙</div>
+        <div class="gold-reward-subtext">Gold Earned!</div>
+    `;
+
+    // Trigger animation
+    overlay.classList.remove('fade-out');
+    overlay.classList.add('visible');
+
+    // Fade out after 2 seconds
+    setTimeout(() => {
+        overlay.classList.add('fade-out');
+        setTimeout(() => {
+            overlay.classList.remove('visible', 'fade-out');
+        }, 500);
+    }, 2000);
+}
+
+// Check if level reached a new threshold and award gold
+function checkAndAwardGold(rootId, newLevel) {
+    if (!rootId || newLevel <= 0) return;
+
+    const treeData = treeGold[rootId] || { gold: 0, lastThreshold: 0 };
+
+    // Calculate what threshold this level should trigger
+    let thresholdToCheck;
+    if (newLevel <= 100) {
+        thresholdToCheck = Math.floor(newLevel / 10) * 10;
+    } else {
+        thresholdToCheck = Math.floor(newLevel / 100) * 100;
+    }
+
+    // Only award if we've reached a new threshold beyond last awarded
+    if (thresholdToCheck > treeData.lastThreshold && thresholdToCheck > 0) {
+        // Award gold for this threshold
+        const goldAmount = thresholdToCheck <= 100 ? 100 : 1000;
+        treeData.gold += goldAmount;
+        treeData.lastThreshold = thresholdToCheck;
+        treeGold[rootId] = treeData;
+
+        // Show celebration popup
+        showGoldRewardOverlay(goldAmount);
+
+        // Save to session
+        saveTreeGold();
+    }
+}
+
+// Typewriter effect for streaming text appearance
+let chatTypewriterIntervalId = null;
+
+function typewriterEffect(text, element, speed = 15) {
+    return new Promise((resolve) => {
+        // Clear any existing typewriter
+        if (chatTypewriterIntervalId) {
+            clearInterval(chatTypewriterIntervalId);
+        }
+
+        element.textContent = '';
+        element.classList.remove('generating');
+        let i = 0;
+
+        chatTypewriterIntervalId = setInterval(() => {
+            if (i < text.length) {
+                element.textContent += text[i];
+                i++;
+                // Auto-scroll sidebar as text appears
+                const container = document.getElementById('chat-conversation');
+                if (container) {
+                    container.scrollTop = container.scrollHeight;
+                }
+            } else {
+                clearInterval(chatTypewriterIntervalId);
+                chatTypewriterIntervalId = null;
+                resolve();
+            }
+        }, speed);
+    });
+}
+
 // ============ INITIALIZATION ============
 function initChat() {
     loadChatSessions();
     loadChatSettings();
+    loadGamification();
     setupChatEventListeners();
     // Note: renderChatHistory() is called in enterChatMode() when DOM is ready
 }
@@ -42,12 +508,54 @@ function saveChatSettings() {
     }
 }
 
+// ============ TREE COUNT ============
+// Count trees on canvas (SystemMessage nodes without parents = root nodes)
+function countTrees() {
+    if (!app?.canvasRenderer || !app?.connectionManager) return 0;
+
+    const nodes = app.canvasRenderer.nodes;
+    const connections = app.connectionManager.connections;
+
+    // Find SystemMessage nodes that have no parent connection (root nodes)
+    const rootNodes = nodes.filter(node => {
+        if (node.type !== 'SystemMessage') return false;
+        // Check if any connection points to this node as input
+        const hasParent = connections.some(c => c.inputNode.id === node.id);
+        return !hasParent;
+    });
+
+    return rootNodes.length;
+}
+
+// Update tree count display
+function updateTreeCount() {
+    const treesEl = document.getElementById('canvas-trees');
+    if (treesEl) {
+        treesEl.textContent = `Trees: ${countTrees()}`;
+    }
+}
+
 // ============ MODE SWITCHING ============
 function enterChatMode() {
-    // Exit journal mode first if active
+    // Exit other modes first if active
     if (typeof journalMode !== 'undefined' && journalMode && typeof exitJournalMode === 'function') {
         exitJournalMode();
     }
+    if (typeof isAgentMode === 'function' && isAgentMode() && typeof resetAgentModeState === 'function') {
+        // Don't call exitAgentMode() as it will re-activate Design Flow
+        // Just reset agent mode state
+        resetAgentModeState();
+    }
+    if (typeof isTasksMode === 'function' && isTasksMode() && typeof resetTasksModeState === 'function') {
+        resetTasksModeState();
+    }
+
+    // Hide tasks view container and section
+    const tasksView = document.getElementById('tasks-view-container');
+    const tasksSection = document.getElementById('tasks-section');
+    if (tasksView) tasksView.style.display = 'none';
+    if (tasksSection) tasksSection.style.display = 'none';
+    document.getElementById('tasks-header')?.classList.remove('active');
 
     chatMode = true;
 
@@ -78,14 +586,17 @@ function enterChatMode() {
     document.getElementById('chat-header')?.classList.add('active');
     document.getElementById('journals-header')?.classList.remove('active');
     document.getElementById('design-flow-header')?.classList.remove('active');
+    document.getElementById('agent-header')?.classList.remove('active');
 
     // Switch sections
     const designFlowSection = document.getElementById('design-flow-section');
     const journalsSection = document.getElementById('journals-section');
     const chatSection = document.getElementById('chat-section');
+    const agentSection = document.getElementById('agent-section');
 
     if (designFlowSection) designFlowSection.style.display = 'none';
     if (journalsSection) journalsSection.style.display = 'none';
+    if (agentSection) agentSection.style.display = 'none';
     if (chatSection) chatSection.style.display = 'flex';
 
     // Hide workflow buttons
@@ -117,6 +628,36 @@ function enterChatMode() {
     const watermark = document.getElementById('canvas-watermark');
     if (watermark) watermark.textContent = '';
 
+    // Show gamification UI (level will be set by loadChatTreeToCanvas)
+    showGamificationUI();
+
+    // Show reward bar at bottom of canvas
+    const rewardBar = document.getElementById('reward-bar-bottom');
+    if (rewardBar) rewardBar.classList.add('visible');
+
+    // Hide X/Y coords, show tree count in chat mode
+    const coordsEl = document.getElementById('canvas-coords');
+    const treesEl = document.getElementById('canvas-trees');
+    if (coordsEl) coordsEl.style.display = 'none';
+    if (treesEl) treesEl.style.display = 'inline';
+    updateTreeCount();
+
+    const lottieContainer = document.getElementById('canvas-mode-lottie');
+    if (lottieContainer && typeof lottie !== 'undefined') {
+        // Destroy previous animation if exists
+        if (window.canvasModeLottie) {
+            window.canvasModeLottie.destroy();
+        }
+        lottieContainer.innerHTML = '';
+        window.canvasModeLottie = lottie.loadAnimation({
+            container: lottieContainer,
+            renderer: 'svg',
+            loop: true,
+            autoplay: true,
+            path: 'assets/idea.json'
+        });
+    }
+
     // Load chat tree onto canvas FIRST (creates/loads session)
     loadChatTreeToCanvas();
 
@@ -143,6 +684,27 @@ function exitChatMode() {
     // Save chat tree before exiting
     saveChatTreeData();
     chatMode = false;
+
+    // Hide gamification UI
+    hideGamificationUI();
+
+    // Hide reward bar
+    const rewardBar = document.getElementById('reward-bar-bottom');
+    if (rewardBar) rewardBar.classList.remove('visible');
+
+    // Show X/Y coords, hide tree count when leaving chat mode
+    const coordsEl = document.getElementById('canvas-coords');
+    const treesEl = document.getElementById('canvas-trees');
+    if (coordsEl) coordsEl.style.display = 'inline';
+    if (treesEl) treesEl.style.display = 'none';
+
+    // Destroy lottie animation (only visible in chat mode)
+    if (window.canvasModeLottie) {
+        window.canvasModeLottie.destroy();
+        window.canvasModeLottie = null;
+    }
+    const lottieContainer = document.getElementById('canvas-mode-lottie');
+    if (lottieContainer) lottieContainer.innerHTML = '';
 
     // Remove body class
     document.body.classList.remove('chat-mode-active');
@@ -189,9 +751,12 @@ function exitChatMode() {
             if (el) el.style.display = 'flex';
         });
 
-        // Restore watermark
+        // Restore watermark (no text - animation only in chat mode)
         const watermark = document.getElementById('canvas-watermark');
-        if (watermark) watermark.textContent = 'Design Agent algorithm';
+        if (watermark) watermark.textContent = '';
+
+        // Note: Lottie animation only shows in Chat mode (gamification)
+        // No animation loading for Design Flow mode
 
         // Restore Design Flow canvas
         if (previousDesignFlowStateChat && typeof app !== 'undefined' && app.canvasRenderer && app.connectionManager) {
@@ -321,11 +886,14 @@ function renderConversation() {
                 </div>
             `;
         } else {
+            // Show empty text for "Generating..." state to trigger CSS animation
+            const isGenerating = text === 'Generating...';
+            const displayText = isGenerating ? '' : escapeHtml(text);
             return `
                 <div class="chat-message ${typeClass} ${isLast ? 'active' : ''}"
                      data-node-id="${node.id}">
                     <div class="chat-message-label">${label}:</div>
-                    <div class="chat-message-text">${escapeHtml(text)}</div>
+                    <div class="chat-message-text${isGenerating ? ' generating' : ''}">${displayText}</div>
                 </div>
             `;
         }
@@ -413,17 +981,16 @@ async function generateGPTResponse() {
     const numResponses = chatSettings.numResponses;
     const temperature = chatSettings.temperature;
 
-    // Update button to show loading state
-    const generateBtn = document.getElementById('chat-generate-btn');
+    // 1. INSTANT FEEDBACK: Button glow animation
+    const generateBtn = document.querySelector('.chat-inline-generate-btn, .chat-compose-btn');
     if (generateBtn) {
+        generateBtn.classList.add('generating-glow');
         generateBtn.disabled = true;
-        generateBtn.innerHTML = '<span class="chat-streaming-dot"></span> Generating...';
     }
 
-    // Generate N responses
+    // 2. Create GPT nodes on canvas IMMEDIATELY
     const gptNodes = [];
     for (let i = 0; i < numResponses; i++) {
-        // Calculate position with horizontal spread for multiple responses
         const offsetX = (i - (numResponses - 1) / 2) * 180;
         const gptNode = new Node('GPTMessage',
             selectedNode.x + offsetX,
@@ -432,7 +999,6 @@ async function generateGPTResponse() {
         gptNode.properties.text = 'Generating...';
         app.canvasRenderer.addNode(gptNode);
 
-        // Connect
         if (selectedNode.outputs.length > 0) {
             app.connectionManager.addConnection(selectedNode, 0, gptNode, 0);
         }
@@ -443,30 +1009,49 @@ async function generateGPTResponse() {
     app.canvasRenderer.render();
     app.updateNodeCount();
 
-    // Call API for each response
+    // 3. TRIGGER GAMIFICATION NOW (when nodes appear)
+    if (numResponses >= 2) {
+        transitionToDivergentThinking();
+    }
+
+    // 4. Select first node and update sidebar to show "Generating..." state
+    if (gptNodes.length > 0) {
+        app.canvasRenderer.selectNode(gptNodes[0]);
+        selectedChatNodeId = gptNodes[0].id;
+    }
+    renderConversation();
+
+    // 5. Call API and typewriter each response
     for (let i = 0; i < gptNodes.length; i++) {
+        // Select this node to show it in sidebar
+        app.canvasRenderer.selectNode(gptNodes[i]);
+        selectedChatNodeId = gptNodes[i].id;
+        renderConversation();
+
         try {
             const response = await chatAPI.generateResponse(messages, temperature);
             gptNodes[i].properties.text = response;
+
+            // Typewriter effect in sidebar
+            const msgElement = document.querySelector(`[data-node-id="${gptNodes[i].id}"] .chat-message-text`);
+            if (msgElement) {
+                await typewriterEffect(response, msgElement, 12);
+            }
         } catch (error) {
             gptNodes[i].properties.text = `Error: ${error.message}`;
             if (typeof app !== 'undefined' && app.workflowManager) {
                 app.workflowManager.showNotification(`API Error: ${error.message}`, 'error');
             }
         }
+
+        // Update canvas after each response
         app.canvasRenderer.render();
     }
 
-    // Select first GPT node
-    if (gptNodes.length > 0) {
-        app.canvasRenderer.selectNode(gptNodes[0]);
-        selectedChatNodeId = gptNodes[0].id;
-    }
-
-    // Restore button
+    // 6. Final cleanup - restore button
     if (generateBtn) {
+        generateBtn.classList.remove('generating-glow');
         generateBtn.disabled = false;
-        generateBtn.innerHTML = 'Generate <strong>GPT</strong> response';
     }
 
     renderConversation();
@@ -489,6 +1074,10 @@ function composeUserResponse() {
     const selectedNode = app.canvasRenderer.nodes.find(n => n.id === selectedChatNodeId);
     if (!selectedNode) return;
 
+    // Gamification: Switch to Convergent Thinking and increment streak
+    transitionToConvergentThinking();
+    incrementStreak();
+
     // Create new empty User node below selected
     const userNode = new Node('UserMessage', selectedNode.x, selectedNode.y + 80);
     userNode.properties.text = '';
@@ -502,6 +1091,9 @@ function composeUserResponse() {
     // Select new node
     app.canvasRenderer.selectNode(userNode);
     selectedChatNodeId = userNode.id;
+
+    // Recalculate level for this tree after adding node
+    updateLevelForCurrentTree();
 
     app.canvasRenderer.render();
     app.updateNodeCount();
@@ -557,7 +1149,8 @@ function createNewSession() {
         nodes: [],
         connections: [],
         createdAt: Date.now(),
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
+        thinkingLevel: 0  // Per-session thinking level
     };
     chatSessions.unshift(session); // Add to beginning
     currentSessionId = session.id;
@@ -567,6 +1160,16 @@ function createNewSession() {
     // Clear canvas before creating new starter nodes
     app.canvasRenderer.nodes = [];
     app.connectionManager.connections = [];
+
+    // Reset tree levels and gold for new session
+    treeLevels = {};
+    treeGold = {};
+
+    // Reset thinking state display (level 0)
+    chatGamification.thinkingLevel = 0;
+    chatGamification.thinkingMode = 'initial';
+    updateGamificationDisplay();
+    updateRewardBarDisplay();
 
     createStarterNodes();
 }
@@ -579,7 +1182,16 @@ function loadSession(sessionId) {
     if (!session) return;
 
     currentSessionId = sessionId;
+
+    // Load tree levels and gold from session BEFORE loading canvas
+    loadTreeLevels(session);
+    loadTreeGold(session);
+
     loadSessionToCanvas(session);
+
+    // Update level display for selected tree
+    updateLevelForCurrentTree();
+
     renderChatHistory();
     renderConversation();
 }
@@ -598,6 +1210,9 @@ function saveCurrentSession() {
         session.title = generateSessionTitle(session.nodes);
     }
     session.updatedAt = Date.now();
+    // Save tree levels and gold (per-tree data)
+    session.treeLevels = { ...treeLevels };
+    session.treeGold = { ...treeGold };
     saveChatSessions();
 }
 
@@ -635,6 +1250,7 @@ function loadSessionToCanvas(session) {
 
     app.canvasRenderer.render();
     app.updateNodeCount();
+    updateTreeCount();  // Update tree count display
 
     // Fit nodes to view after loading
     setTimeout(() => {
@@ -658,13 +1274,18 @@ function loadChatTreeToCanvas() {
         if (!currentSessionId) {
             currentSessionId = chatSessions[0].id;
         }
-        const session = chatSessions.find(s => s.id === currentSessionId);
+        const session = chatSessions.find(s => s.id === currentSessionId) || chatSessions[0];
         if (session) {
+            currentSessionId = session.id;
+
+            // Load tree levels and gold from session BEFORE loading canvas
+            loadTreeLevels(session);
+            loadTreeGold(session);
+
             loadSessionToCanvas(session);
-        } else {
-            // Session not found, load the most recent one
-            currentSessionId = chatSessions[0].id;
-            loadSessionToCanvas(chatSessions[0]);
+
+            // Update level display for selected tree
+            updateLevelForCurrentTree();
         }
     }
 }
@@ -689,6 +1310,9 @@ function createStarterNodes() {
     // Select User node
     app.canvasRenderer.selectNode(userNode);
     selectedChatNodeId = userNode.id;
+
+    // Update tree count display
+    updateTreeCount();
 }
 
 // ============ EVENT LISTENERS ============
@@ -717,6 +1341,16 @@ function setupChatEventListeners() {
     const journalsHeader = document.getElementById('journals-header');
     if (journalsHeader) {
         journalsHeader.addEventListener('click', (e) => {
+            if (!e.target.closest('.collapse-btn') && chatMode) {
+                exitChatMode();
+            }
+        });
+    }
+
+    // Agent header click - handle exiting chat mode
+    const agentHeader = document.getElementById('agent-header');
+    if (agentHeader) {
+        agentHeader.addEventListener('click', (e) => {
             if (!e.target.closest('.collapse-btn') && chatMode) {
                 exitChatMode();
             }
@@ -940,6 +1574,10 @@ function addChatNodeToCanvas(type) {
 function onChatNodeSelected(node) {
     if (!chatMode) return;
     selectedChatNodeId = node?.id || null;
+
+    // Update level for THIS tree's lineage (per-tree level tracking)
+    updateLevelForCurrentTree();
+
     renderConversation();
 }
 
@@ -1081,8 +1719,12 @@ function addNewTreeBranch() {
     app.canvasRenderer.selectNode(userNode);
     selectedChatNodeId = userNode.id;
 
+    // Reset level for new tree (starts at 0)
+    updateLevelForCurrentTree();
+
     app.canvasRenderer.render();
     app.updateNodeCount();
+    updateTreeCount();  // Update tree count display
     renderConversation();
     saveChatTreeData();
 

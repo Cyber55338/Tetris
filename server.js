@@ -2,6 +2,18 @@
 const http = require('http');
 const https = require('https');
 const url = require('url');
+const fs = require('fs');
+const path = require('path');
+
+// Load .env file
+try {
+    const envPath = path.join(__dirname, '.env');
+    const envContent = fs.readFileSync(envPath, 'utf8');
+    envContent.split('\n').forEach(line => {
+        const [key, ...vals] = line.split('=');
+        if (key && vals.length) process.env[key.trim()] = vals.join('=').trim();
+    });
+} catch (e) {}
 
 const API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const PORT = 3000;

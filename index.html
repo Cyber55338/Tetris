@@ -49,11 +49,11 @@
                     Load
                 </button>
                 <div class="toolbar-separator"></div>
-                <button id="btn-execute" class="toolbar-btn btn-primary" title="Execute Workflow (Ctrl+Enter)">
+                <button id="btn-execute" class="toolbar-btn btn-primary" title="Mint NFT (Ctrl+Enter)">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polygon points="5 3 19 12 5 21 5 3"/>
                     </svg>
-                    Execute
+                    Mint NFT
                 </button>
                 <button id="btn-simulate" class="toolbar-btn btn-primary" title="Simulate on Smartwatch">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -67,6 +67,14 @@
                         <polygon points="22 2 15 22 11 13 2 9 22 2"/>
                     </svg>
                     Send
+                </button>
+                <button id="btn-download" class="toolbar-btn btn-primary" title="Download Workflow">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    Download
                 </button>
             </div>
             <div class="toolbar-section">
@@ -99,6 +107,23 @@
                             <circle cx="12" cy="10" r="3"/>
                             <path d="M6.168 18.849A4 4 0 0 1 10 16h4a4 4 0 0 1 3.834 2.855"/>
                         </svg>
+                    </button>
+                    <!-- Profile Connect Button -->
+                    <button id="btn-profile-connect" class="toolbar-btn btn-profile-connect" title="Connect Profile">
+                        <svg class="connect-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                            <polyline points="20 6 9 17 4 12"/>
+                        </svg>
+                        <span class="connect-text">Connect</span>
+                    </button>
+                    <!-- Smartwatch Button with Status -->
+                    <button id="btn-smartwatch" class="toolbar-btn btn-smartwatch" title="Connect Smartwatch" disabled>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <!-- Watch straps -->
+                            <path d="M9 1v3M15 1v3M9 20v3M15 20v3"/>
+                            <!-- Watch face -->
+                            <rect x="5" y="4" width="14" height="16" rx="3"/>
+                        </svg>
+                        <span class="smartwatch-status disconnected">Disconnected</span>
                     </button>
                 </div>
             </div>
@@ -260,16 +285,76 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Agent Header -->
+                <div class="sidebar-header" id="agent-header">
+                    <div class="sidebar-title-container">
+                        <svg class="sidebar-icon-main" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="8" r="4"/>
+                            <path d="M4 20c0-4 4-6 8-6s8 2 8 6"/>
+                        </svg>
+                        <span class="sidebar-title-text">Design Agent</span>
+                    </div>
+                    <button class="collapse-btn" id="collapse-agent">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="15 18 9 12 15 6"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Agent Section -->
+                <div class="sidebar-section" id="agent-section" style="display: none;">
+                    <!-- Content rendered by agent.js -->
+                </div>
+
+                <!-- Tasks Header -->
+                <div class="sidebar-header" id="tasks-header">
+                    <div class="sidebar-title-container">
+                        <svg class="sidebar-icon-main" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 11l3 3L22 4"/>
+                            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                        </svg>
+                        <span class="sidebar-title-text">Playground</span>
+                    </div>
+                    <button class="collapse-btn" id="collapse-tasks">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="15 18 9 12 15 6"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Tasks Section -->
+                <div class="sidebar-section" id="tasks-section" style="display: none;">
+                    <!-- Content rendered by tasks.js -->
+                </div>
             </div>
 
             <!-- Canvas Area -->
             <div class="canvas-container">
-                <div id="canvas-watermark">Design Agent algorithm</div>
+                <!-- Chat Gamification (visible only in chat mode) -->
+                <div id="chat-gamification" class="chat-gamification">
+                    <div id="canvas-mode-lottie" class="canvas-mode-lottie"></div>
+                    <div class="thinking-label" id="thinking-label">Thinking</div>
+                    <div class="thinking-level" id="thinking-level"></div>
+                </div>
+                <div id="canvas-watermark"></div>
                 <canvas id="workflow-canvas"></canvas>
+                <div id="canvas-lottie-overlay" class="canvas-lottie-overlay"></div>
                 <div class="canvas-info">
                     <span id="canvas-coords">X: 0, Y: 0</span>
+                    <span id="canvas-trees" style="display: none;">Trees: 0</span>
                     <span class="separator">|</span>
                     <span id="node-count">Nodes: 0</span>
+                </div>
+                <!-- Gold Reward Bar (bottom of canvas, chat mode only) -->
+                <div class="reward-bar-bottom" id="reward-bar-bottom">
+                    <div class="reward-bar-label">Next Reward:</div>
+                    <div class="reward-bar-track">
+                        <div class="reward-bar-fill" id="reward-bar-fill"></div>
+                    </div>
+                    <div class="reward-bar-text" id="reward-bar-text">0/10 levels</div>
+                    <div class="reward-bar-icon" id="reward-bar-icon"></div>
+                    <div class="reward-bar-gold" id="reward-bar-gold">+100</div>
                 </div>
                 <!-- Minimap -->
                 <div class="minimap-container" id="minimap-container">
@@ -304,6 +389,25 @@
                     <div class="context-menu-separator"></div>
                     <div class="context-menu-item" data-action="delete-workflow">Delete</div>
                 </div>
+
+                <!-- Annotation Context Menu (Journals Mode) -->
+                <div id="annotation-context-menu" class="context-menu hidden">
+                    <div class="context-menu-item" data-action="convert-to-thought">Convert to Thought</div>
+                    <div class="context-menu-item" data-action="convert-to-imagination">Convert to Imagination</div>
+                    <div class="context-menu-item" data-action="convert-to-belief">Convert to Belief</div>
+                    <div class="context-menu-separator"></div>
+                    <div class="context-menu-item" data-action="edit-annotation">Edit</div>
+                    <div class="context-menu-item" data-action="delete-annotation">Delete</div>
+                </div>
+
+                <!-- Agent Thread Context Menu -->
+                <div id="agent-thread-context-menu" class="context-menu hidden">
+                    <div class="context-menu-item" data-action="rename-thread">Rename</div>
+                    <div class="context-menu-item" data-action="download-thread">Download</div>
+                    <div class="context-menu-separator"></div>
+                    <div class="context-menu-item" data-action="delete-thread">Delete</div>
+                </div>
+
             </div>
 
             <!-- Journal View (hidden by default) -->
@@ -355,6 +459,183 @@
                 </div>
             </div>
 
+            <!-- Tasks View (Habitica-style, hidden by default) -->
+            <div class="tasks-view-container" id="tasks-view-container" style="display: none;">
+                <!-- Stats Header -->
+                <div class="tasks-stats-header">
+                    <div class="tasks-avatar-section">
+                        <div class="tasks-avatar" id="tasks-avatar">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="8" r="4"/>
+                                <path d="M4 20c0-4 4-6 8-6s8 2 8 6"/>
+                            </svg>
+                        </div>
+                        <div class="tasks-user-info">
+                            <span class="tasks-username" id="tasks-username">Adventurer</span>
+                            <span class="tasks-level" id="tasks-level">Level 1</span>
+                            <div class="tasks-currency-section">
+                                <div class="currency-item gold">
+                                    <span class="currency-icon">🪙</span>
+                                    <span class="currency-amount" id="gold-amount">0</span>
+                                </div>
+                                <div class="currency-item gems">
+                                    <span class="currency-icon">💎</span>
+                                    <span class="currency-amount" id="gems-amount">0</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="tasks-bars-section">
+                        <div class="tasks-stat-bar health-bar">
+                            <div class="stat-bar-icon">❤️</div>
+                            <div class="stat-bar-track">
+                                <div class="stat-bar-fill" id="health-bar-fill" style="width: 100%"></div>
+                            </div>
+                            <span class="stat-bar-text" id="health-text">50/50</span>
+                        </div>
+                        <div class="tasks-stat-bar exp-bar">
+                            <div class="stat-bar-icon">⭐</div>
+                            <div class="stat-bar-track">
+                                <div class="stat-bar-fill" id="exp-bar-fill" style="width: 0%"></div>
+                            </div>
+                            <span class="stat-bar-text" id="exp-text">0/100</span>
+                        </div>
+                        <div class="tasks-stat-bar mana-bar">
+                            <div class="stat-bar-icon">💧</div>
+                            <div class="stat-bar-track">
+                                <div class="stat-bar-fill" id="mana-bar-fill" style="width: 100%"></div>
+                            </div>
+                            <span class="stat-bar-text" id="mana-text">30/30</span>
+                        </div>
+                    </div>
+
+                    <!-- AI Agent Section (Right Side - Mirrored Layout) -->
+                    <div class="agent-stats-section">
+                        <div class="agent-prize-section">
+                            <div class="prize-pool">
+                                <span class="prize-label">Prize Pool</span>
+                                <span class="prize-value">$10,000</span>
+                                <span class="prize-eth">≈ 2.5 ETH</span>
+                            </div>
+                            <div class="distribution-timer">
+                                <span class="timer-label">Distribution in</span>
+                                <span class="timer-value" id="distribution-timer">5h 21m 45s</span>
+                            </div>
+                        </div>
+                        <div class="agent-bars-section">
+                            <div class="tasks-stat-bar bonding-bar">
+                                <div class="stat-bar-icon">📈</div>
+                                <div class="stat-bar-track">
+                                    <div class="stat-bar-fill" id="bonding-bar-fill" style="width: 67%"></div>
+                                </div>
+                                <span class="stat-bar-text">67%</span>
+                            </div>
+                            <div class="tasks-stat-bar ath-bar">
+                                <div class="stat-bar-icon">🏆</div>
+                                <div class="stat-bar-track">
+                                    <div class="stat-bar-fill" id="ath-bar-fill" style="width: 25%"></div>
+                                </div>
+                                <span class="stat-bar-text">25%</span>
+                            </div>
+                        </div>
+                        <div class="agent-info">
+                            <span class="agent-name">AI Agent</span>
+                            <div class="agent-stats-grid">
+                                <div class="agent-stat-item">
+                                    <span class="stat-label">MCap</span>
+                                    <span class="stat-value">$125K</span>
+                                </div>
+                                <div class="agent-stat-item">
+                                    <span class="stat-label">24h</span>
+                                    <span class="stat-value positive">+24%</span>
+                                </div>
+                                <div class="agent-stat-item">
+                                    <span class="stat-label">Vol</span>
+                                    <span class="stat-value">1M</span>
+                                </div>
+                                <div class="agent-stat-item">
+                                    <span class="stat-label">Tax</span>
+                                    <span class="stat-value">1%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="agent-avatar">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="3"/>
+                                <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Task Columns -->
+                <div class="tasks-columns-container">
+                    <!-- Agents Column (formerly Habits) -->
+                    <div class="tasks-column" data-column="habits">
+                        <div class="column-header">
+                            <h3 class="column-title">Agents</h3>
+                            <button class="column-add-btn" data-type="habit" title="Add Agent">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="12" y1="5" x2="12" y2="19"/>
+                                    <line x1="5" y1="12" x2="19" y2="12"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="column-content" id="habits-list">
+                            <!-- Agents rendered by JS -->
+                        </div>
+                    </div>
+
+                    <!-- Flows Column (formerly Dailies) -->
+                    <div class="tasks-column" data-column="dailies">
+                        <div class="column-header">
+                            <h3 class="column-title">Flows</h3>
+                            <button class="column-add-btn" data-type="daily" title="Add Flow">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="12" y1="5" x2="12" y2="19"/>
+                                    <line x1="5" y1="12" x2="19" y2="12"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="column-content" id="dailies-list">
+                            <!-- Flows rendered by JS -->
+                        </div>
+                    </div>
+
+                    <!-- To-Dos Column -->
+                    <div class="tasks-column" data-column="todos">
+                        <div class="column-header">
+                            <h3 class="column-title">To Do's</h3>
+                            <button class="column-add-btn" data-type="todo" title="Add To-Do">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="12" y1="5" x2="12" y2="19"/>
+                                    <line x1="5" y1="12" x2="19" y2="12"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="column-content" id="todos-list">
+                            <!-- To-Dos rendered by JS -->
+                        </div>
+                    </div>
+
+                    <!-- Rewards Column -->
+                    <div class="tasks-column" data-column="rewards">
+                        <div class="column-header">
+                            <h3 class="column-title">Rewards</h3>
+                            <button class="column-add-btn" data-type="reward" title="Add Reward">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="12" y1="5" x2="12" y2="19"/>
+                                    <line x1="5" y1="12" x2="19" y2="12"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="column-content" id="rewards-list">
+                            <!-- Rewards rendered by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Right Sidebar - Properties Panel -->
             <div class="sidebar sidebar-right" id="properties-panel">
                 <div class="sidebar-header">
@@ -383,16 +664,60 @@
     <!-- Hidden file input for loading workflows -->
     <input type="file" id="file-input" accept=".json" style="display: none;">
 
+    <!-- Global Overlays (outside canvas-container so they work in all modes) -->
+    <!-- Agent Selector Overlay -->
+    <div class="agent-selector-overlay hidden" id="agent-selector-overlay">
+        <div class="agent-selector-popup">
+            <div class="agent-selector-header">Send to Agent</div>
+            <div class="agent-selector-list" id="agent-selector-list">
+                <!-- Agent items rendered by JavaScript -->
+            </div>
+            <div class="agent-selector-actions">
+                <button class="btn btn-secondary" id="cancel-agent-select">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Smartwatch Selector Overlay -->
+    <div class="smartwatch-selector-overlay hidden" id="smartwatch-selector-overlay">
+        <div class="smartwatch-selector-popup">
+            <div class="smartwatch-selector-header">Select Smartwatch</div>
+            <div class="smartwatch-selector-list" id="smartwatch-selector-list">
+                <!-- Smartwatch items rendered by JavaScript -->
+            </div>
+            <div class="smartwatch-selector-actions">
+                <button class="btn btn-secondary" id="cancel-smartwatch-select">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Date Popup (Journals) -->
+    <div class="add-date-overlay hidden" id="add-date-overlay">
+        <div class="add-date-popup">
+            <div class="add-date-header">Add New Date</div>
+            <div class="add-date-content">
+                <input type="date" id="add-date-input" class="add-date-input" required>
+            </div>
+            <div class="add-date-actions">
+                <button class="btn btn-primary" id="confirm-add-date">Add</button>
+                <button class="btn btn-secondary" id="cancel-add-date">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Scripts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.12.2/lottie.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/roughjs@4.6.6/bundled/rough.min.js"></script>
     <script src="nodes.js?v=20251121"></script>
     <script src="canvas.js?v=20251122a"></script>
     <script src="connections.js?v=20251121"></script>
-    <script src="workflow.js?v=20251121"></script>
-    <script src="whoopData.js?v=20251121c"></script>
-    <script src="comfyui.js?v=20251124"></script>
-    <script src="journals.js?v=20251124c"></script>
-    <script src="chat-api.js?v=20251125"></script>
-    <script src="chat.js?v=20251125"></script>
+    <script src="workflow.js?v=20251205"></script>
+    <script src="comfyui.js?v=20251205"></script>
+    <script src="journals.js?v=20251205"></script>
+    <script src="annotations.js?v=20251208"></script>
+    <script src="chat-api.js?v=20251205"></script>
+    <script src="chat.js?v=20251205"></script>
+    <script src="agent.js?v=20251205"></script>
+    <script src="tasks.js?v=20251206"></script>
 </body>
 </html>

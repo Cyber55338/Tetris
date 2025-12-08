@@ -1,6 +1,6 @@
 // Chat API Module - Claude API Integration
 const chatAPI = {
-    apiKey: null,
+    apiKey: '', // Set via localStorage or setApiKey()
     model: 'claude-3-haiku-20240307',
 
     setApiKey(key) {

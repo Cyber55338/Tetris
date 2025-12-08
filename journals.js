@@ -92,8 +92,13 @@ function getCanvasForDate(dateString) {
     if (!journalCanvasData[dateString]) {
         journalCanvasData[dateString] = {
             nodes: [],
-            connections: []
+            connections: [],
+            annotations: []
         };
+    }
+    // Ensure annotations array exists for older saved data
+    if (!journalCanvasData[dateString].annotations) {
+        journalCanvasData[dateString].annotations = [];
     }
     return journalCanvasData[dateString];
 }
@@ -108,7 +113,9 @@ function saveCurrentJournalCanvas() {
             connections: app.connectionManager.connections.map(conn => ({
                 output: { nodeId: conn.outputNode.id, index: conn.outputIndex },
                 input: { nodeId: conn.inputNode.id, index: conn.inputIndex }
-            }))
+            })),
+            // Save annotations if manager exists
+            annotations: (app.annotationManager) ? app.annotationManager.toJSON() : []
         };
         saveJournalCanvasData();
     }
@@ -121,6 +128,11 @@ function loadJournalCanvasForDate(dateString) {
         // Clear current canvas
         app.canvasRenderer.nodes = [];
         app.connectionManager.connections = [];
+
+        // Clear annotations if manager exists
+        if (app.annotationManager) {
+            app.annotationManager.clearAnnotations();
+        }
 
         // Load nodes
         if (canvasData.nodes && canvasData.nodes.length > 0) {
@@ -147,6 +159,11 @@ function loadJournalCanvasForDate(dateString) {
             }
         }
 
+        // Load annotations if manager exists
+        if (app.annotationManager && canvasData.annotations && canvasData.annotations.length > 0) {
+            app.annotationManager.fromJSON(canvasData.annotations);
+        }
+
         // Re-render
         app.canvasRenderer.render();
         app.updateNodeCount();
@@ -157,7 +174,10 @@ function loadJournalCanvasForDate(dateString) {
 function getAllJournalDates() {
     const dates = Object.keys(journalCanvasData).filter(date => {
         const canvas = journalCanvasData[date];
-        return canvas.nodes && canvas.nodes.length > 0;
+        // Include dates with nodes OR annotations
+        const hasNodes = canvas.nodes && canvas.nodes.length > 0;
+        const hasAnnotations = canvas.annotations && canvas.annotations.length > 0;
+        return hasNodes || hasAnnotations;
     });
 
     // Always include today even if empty
@@ -174,6 +194,31 @@ function getAllJournalDates() {
 
 // Mode switching
 function enterJournalMode() {
+    // Exit other modes first if active
+    if (typeof isChatMode === 'function' && isChatMode() && typeof exitChatMode === 'function') {
+        exitChatMode();
+    }
+    if (typeof isAgentMode === 'function' && isAgentMode() && typeof resetAgentModeState === 'function') {
+        // Don't call exitAgentMode() as it will re-activate Design Flow
+        // Just reset agent mode state
+        resetAgentModeState();
+    }
+    if (typeof isTasksMode === 'function' && isTasksMode() && typeof resetTasksModeState === 'function') {
+        resetTasksModeState();
+    }
+
+    // Hide tasks view container and section
+    const tasksView = document.getElementById('tasks-view-container');
+    const tasksSection = document.getElementById('tasks-section');
+    if (tasksView) tasksView.style.display = 'none';
+    if (tasksSection) tasksSection.style.display = 'none';
+    document.getElementById('tasks-header')?.classList.remove('active');
+
+    // Hide gamification UI from chat mode
+    if (typeof hideGamificationUI === 'function') {
+        hideGamificationUI();
+    }
+
     journalMode = true;
 
     // Expand sidebar if collapsed (so user can see the mode they navigated to)
@@ -198,12 +243,21 @@ function enterJournalMode() {
     }
 
     // Highlight Journals header
-    document.getElementById('journals-header').classList.add('active');
-    document.getElementById('design-flow-header').classList.remove('active');
+    document.getElementById('journals-header')?.classList.add('active');
+    document.getElementById('design-flow-header')?.classList.remove('active');
+    document.getElementById('chat-header')?.classList.remove('active');
+    document.getElementById('agent-header')?.classList.remove('active');
 
     // Switch sidebar sections
-    document.getElementById('design-flow-section').style.display = 'none';
-    document.getElementById('journals-section').style.display = 'flex';
+    const designFlowSection = document.getElementById('design-flow-section');
+    const journalsSection = document.getElementById('journals-section');
+    const chatSection = document.getElementById('chat-section');
+    const agentSection = document.getElementById('agent-section');
+
+    if (designFlowSection) designFlowSection.style.display = 'none';
+    if (chatSection) chatSection.style.display = 'none';
+    if (agentSection) agentSection.style.display = 'none';
+    if (journalsSection) journalsSection.style.display = 'flex';
 
     // Keep canvas visible (don't hide it)
     const canvasContainer = document.querySelector('.canvas-container');
@@ -224,6 +278,17 @@ function enterJournalMode() {
     if (executeBtn) executeBtn.style.display = 'none';
     if (simulateBtn) simulateBtn.style.display = 'none';
     if (sendBtn) sendBtn.style.display = 'none';
+
+    // Change New button to Add Date
+    const btnNew = document.getElementById('btn-new');
+    if (btnNew) {
+        // Find and replace the text content
+        Array.from(btnNew.childNodes).forEach(node => {
+            if (node.nodeType === 3 && node.textContent.trim()) {
+                node.textContent = node.textContent.replace('New', 'Add Date');
+            }
+        });
+    }
 
     // Load journal data for current date
     currentJournalDate = getTodayDateString();
@@ -253,12 +318,14 @@ function exitJournalMode() {
     }
 
     // Highlight Design Flow header
-    document.getElementById('journals-header').classList.remove('active');
-    document.getElementById('design-flow-header').classList.add('active');
+    document.getElementById('journals-header')?.classList.remove('active');
+    document.getElementById('design-flow-header')?.classList.add('active');
 
     // Switch sidebar sections
-    document.getElementById('design-flow-section').style.display = 'flex';
-    document.getElementById('journals-section').style.display = 'none';
+    const designFlowSection = document.getElementById('design-flow-section');
+    const journalsSection = document.getElementById('journals-section');
+    if (designFlowSection) designFlowSection.style.display = 'flex';
+    if (journalsSection) journalsSection.style.display = 'none';
 
     // Keep canvas visible
     const canvasContainer = document.querySelector('.canvas-container');
@@ -273,6 +340,16 @@ function exitJournalMode() {
     if (executeBtn) executeBtn.style.display = 'flex';
     if (simulateBtn) simulateBtn.style.display = 'flex';
     if (sendBtn) sendBtn.style.display = 'flex';
+
+    // Restore New button text
+    const btnNew = document.getElementById('btn-new');
+    if (btnNew) {
+        Array.from(btnNew.childNodes).forEach(node => {
+            if (node.nodeType === 3 && node.textContent.trim()) {
+                node.textContent = node.textContent.replace('Add Date', 'New');
+            }
+        });
+    }
 
     // Restore original watermark
     const watermark = document.getElementById('canvas-watermark');
@@ -338,7 +415,17 @@ function setupJournalEventListeners() {
     if (designFlowHeader) {
         designFlowHeader.addEventListener('click', (e) => {
             // Prevent triggering if clicking collapse button
-            if (!e.target.closest('.collapse-btn')) {
+            if (!e.target.closest('.collapse-btn') && journalMode) {
+                exitJournalMode();
+            }
+        });
+    }
+
+    // Agent header - exit journal mode when clicked
+    const agentHeader = document.getElementById('agent-header');
+    if (agentHeader) {
+        agentHeader.addEventListener('click', (e) => {
+            if (!e.target.closest('.collapse-btn') && journalMode) {
                 exitJournalMode();
             }
         });
@@ -369,6 +456,27 @@ function setupJournalEventListeners() {
             saveCurrentJournalCanvas();
         }
     }, 5000); // Save every 5 seconds
+
+    // Add date popup event listeners
+    document.getElementById('confirm-add-date')?.addEventListener('click', confirmAddDate);
+    document.getElementById('cancel-add-date')?.addEventListener('click', hideAddDatePopup);
+
+    // Close popup on overlay click
+    document.getElementById('add-date-overlay')?.addEventListener('click', (e) => {
+        if (e.target.id === 'add-date-overlay') {
+            hideAddDatePopup();
+        }
+    });
+
+    // Close popup on Escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            const overlay = document.getElementById('add-date-overlay');
+            if (overlay && !overlay.classList.contains('hidden')) {
+                hideAddDatePopup();
+            }
+        }
+    });
 }
 
 // Populate sidebar with nodes
@@ -412,6 +520,24 @@ function populatePerceptionGraphNodes() {
     });
 }
 
+// Animation paths for sidebar nodes
+const sidebarNodeAnimations = {
+    'Thought': 'assets/Tetrahedron.json',
+    'Imagination': 'assets/Octahedron.json',
+    'Action': 'assets/Dodecahedron.json',
+    'Belief': 'assets/Icosahedron.json',
+    'Emotion': 'assets/Cube.json',
+    'Dreams': 'assets/dreams.json',
+    'Goals': 'assets/goals.json',
+    'Rules': 'assets/rules.json',
+    'Memories': 'assets/memories.json',
+    'Questions': 'assets/questions.json',
+    'Danger': 'assets/dangers.json',
+    'Expressions': 'assets/heart.json',
+    'Problem': 'assets/question.json',
+    'Instructions': 'assets/idea.json'
+};
+
 function createDraggableNodeItem(nodeType, definition) {
     const nodeItem = document.createElement('div');
     nodeItem.className = 'node-item';
@@ -419,11 +545,30 @@ function createDraggableNodeItem(nodeType, definition) {
     nodeItem.dataset.nodeType = nodeType;
     nodeItem.dataset.nodeTitle = definition.title;
 
-    // Color indicator
-    const colorIndicator = document.createElement('span');
-    colorIndicator.className = 'node-color-indicator';
-    colorIndicator.style.backgroundColor = definition.color;
-    nodeItem.appendChild(colorIndicator);
+    // Check if this node has a Lottie animation
+    const animPath = sidebarNodeAnimations[nodeType];
+
+    if (animPath && typeof lottie !== 'undefined') {
+        // Lottie animation container
+        const lottieContainer = document.createElement('div');
+        lottieContainer.className = 'sidebar-node-lottie';
+        nodeItem.appendChild(lottieContainer);
+
+        // Load animation
+        lottie.loadAnimation({
+            container: lottieContainer,
+            renderer: 'svg',
+            loop: true,
+            autoplay: true,
+            path: animPath
+        });
+    } else {
+        // Fallback: Color indicator
+        const colorIndicator = document.createElement('span');
+        colorIndicator.className = 'node-color-indicator';
+        colorIndicator.style.backgroundColor = definition.color;
+        nodeItem.appendChild(colorIndicator);
+    }
 
     // Node title
     const title = document.createElement('span');
@@ -512,37 +657,6 @@ function renderDatesList() {
 
         container.appendChild(dateItem);
     });
-
-    // Add "New Date" button
-    const addDateBtn = document.createElement('div');
-    addDateBtn.className = 'node-item add-date-btn';
-    addDateBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span>Add Date</span>';
-    addDateBtn.addEventListener('click', () => {
-        // Create date picker
-        const input = document.createElement('input');
-        input.type = 'date';
-        input.style.position = 'absolute';
-        input.style.opacity = '0';
-        document.body.appendChild(input);
-
-        input.addEventListener('change', () => {
-            if (input.value) {
-                navigateToDate(input.value);
-            }
-            document.body.removeChild(input);
-        });
-
-        input.addEventListener('blur', () => {
-            setTimeout(() => {
-                if (document.body.contains(input)) {
-                    document.body.removeChild(input);
-                }
-            }, 100);
-        });
-
-        input.click();
-    });
-    container.appendChild(addDateBtn);
 }
 
 // Check if in journal mode (for external use)
@@ -554,6 +668,60 @@ function isJournalMode() {
 function getCurrentJournalDate() {
     return currentJournalDate;
 }
+
+// ============================================
+// Add Date Popup Functions
+// ============================================
+
+// Show add date popup
+function showAddDatePopup() {
+    const overlay = document.getElementById('add-date-overlay');
+    const input = document.getElementById('add-date-input');
+    if (overlay) {
+        overlay.classList.remove('hidden');
+        // Set default to today
+        if (input) {
+            input.value = getTodayDateString();
+            input.focus();
+        }
+    }
+}
+
+// Hide add date popup
+function hideAddDatePopup() {
+    const overlay = document.getElementById('add-date-overlay');
+    if (overlay) {
+        overlay.classList.add('hidden');
+    }
+}
+
+// Handle add date confirmation
+function confirmAddDate() {
+    const input = document.getElementById('add-date-input');
+    const dateValue = input?.value;
+
+    // Validate date format (YYYY-MM-DD) and that it's a valid date
+    if (dateValue && /^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+        const date = new Date(dateValue);
+        if (!isNaN(date.getTime())) {
+            navigateToDate(dateValue);
+            renderDatesList(); // Refresh dates list
+            hideAddDatePopup();
+            return;
+        }
+    }
+
+    // If invalid or empty, show alert or just don't close
+    if (!dateValue) {
+        // Set to today if empty
+        input.value = getTodayDateString();
+        input.focus();
+    }
+}
+
+// Export popup functions globally
+window.showAddDatePopup = showAddDatePopup;
+window.hideAddDatePopup = hideAddDatePopup;
 
 // Initialize on DOM load
 if (document.readyState === 'loading') {

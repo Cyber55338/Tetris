@@ -26,6 +26,30 @@ class CanvasRenderer {
         // Marquee selection state
         this.marquee = null; // { startX, startY, endX, endY } in screen coords
 
+        // Simulation mode highlighting
+        this.executingNodeId = null;
+        this.completedNodeIds = [];
+
+        // Node Lottie animations
+        this.nodeLottieAnimations = new Map(); // nodeId -> lottie animation instance
+        this.lottieOverlay = null;
+        this.nodeAnimationPaths = {
+            'Thought': 'assets/Tetrahedron.json',
+            'Imagination': 'assets/Octahedron.json',
+            'Action': 'assets/Dodecahedron.json',
+            'Belief': 'assets/Icosahedron.json',
+            'Emotion': 'assets/Cube.json',
+            'Dreams': 'assets/dreams.json',
+            'Goals': 'assets/goals.json',
+            'Rules': 'assets/rules.json',
+            'Memories': 'assets/memories.json',
+            'Questions': 'assets/questions.json',
+            'Danger': 'assets/dangers.json',
+            'Expressions': 'assets/heart.json',
+            'Problem': 'assets/question.json',
+            'Instructions': 'assets/idea.json'
+        };
+
         this.resizeCanvas();
 
         // Keep canvas in sync with its container size (including sidebar collapse/expand)
@@ -86,6 +110,7 @@ class CanvasRenderer {
         if (window.connectionManager) {
             window.connectionManager.clearConnections();
         }
+        this.clearNodeLottieAnimations();
         this.render();
     }
 
@@ -245,10 +270,20 @@ class CanvasRenderer {
             this.drawConnection(ctx, this.connectionStart, this.tempConnectionEnd, '#5a9fd4', true);
         }
 
+        // Draw annotations (Journals mode) - rendered BEFORE nodes so nodes appear on top
+        if (typeof isJournalMode === 'function' && isJournalMode() && window.annotationManager) {
+            window.annotationManager.render(ctx);
+        }
+
         // Draw nodes
         this.nodes.forEach(node => {
             this.drawNode(ctx, node);
         });
+
+        // Draw simulation particles
+        if (typeof app !== 'undefined' && app.simulationParticles && app.simulationParticles.length > 0) {
+            this.drawSimulationParticles(ctx, app.simulationParticles);
+        }
 
         // Restore state
         ctx.restore();
@@ -267,6 +302,106 @@ class CanvasRenderer {
 
         // Render minimap
         this.renderMinimap();
+
+        // Update node Lottie animations
+        this.updateNodeLottieAnimations();
+    }
+
+    // Update Lottie animations positioned on nodes
+    updateNodeLottieAnimations() {
+        if (typeof lottie === 'undefined') return;
+
+        // Get or create the overlay container
+        if (!this.lottieOverlay) {
+            this.lottieOverlay = document.getElementById('canvas-lottie-overlay');
+        }
+        if (!this.lottieOverlay) return;
+
+        // Track which nodes currently exist
+        const currentNodeIds = new Set(this.nodes.map(n => n.id));
+
+        // Remove animations for nodes that no longer exist
+        for (const [nodeId, animData] of this.nodeLottieAnimations) {
+            if (!currentNodeIds.has(nodeId)) {
+                if (animData.animation) animData.animation.destroy();
+                if (animData.container) animData.container.remove();
+                this.nodeLottieAnimations.delete(nodeId);
+            }
+        }
+
+        // Update or create animations for current nodes
+        this.nodes.forEach((node, nodeIndex) => {
+            const animPath = this.nodeAnimationPaths[node.type];
+            if (!animPath) return; // No animation for this node type
+
+            // Calculate screen position
+            const screenPos = this.canvasToScreen(node.x, node.y);
+
+            // Position animation inside node header, vertically centered
+            const lottieSize = 24 * this.scale;
+            const lottieX = screenPos.x + (4 * this.scale);
+            const lottieY = screenPos.y + ((28 * this.scale - lottieSize) / 2);
+
+            // Check if this Lottie is occluded by any node drawn on top (higher index)
+            const lottieCenterX = lottieX + lottieSize / 2;
+            const lottieCenterY = lottieY + lottieSize / 2;
+            let isOccluded = false;
+
+            for (let i = nodeIndex + 1; i < this.nodes.length; i++) {
+                const otherNode = this.nodes[i];
+                const otherScreenPos = this.canvasToScreen(otherNode.x, otherNode.y);
+                const otherWidth = 180 * this.scale;
+                const otherHeight = 150 * this.scale;
+
+                // Check if Lottie center is inside other node's bounds
+                if (lottieCenterX >= otherScreenPos.x &&
+                    lottieCenterX <= otherScreenPos.x + otherWidth &&
+                    lottieCenterY >= otherScreenPos.y &&
+                    lottieCenterY <= otherScreenPos.y + otherHeight) {
+                    isOccluded = true;
+                    break;
+                }
+            }
+
+            if (this.nodeLottieAnimations.has(node.id)) {
+                // Update existing animation position
+                const animData = this.nodeLottieAnimations.get(node.id);
+                animData.container.style.left = `${lottieX}px`;
+                animData.container.style.top = `${lottieY}px`;
+                animData.container.style.width = `${lottieSize}px`;
+                animData.container.style.height = `${lottieSize}px`;
+                animData.container.style.visibility = isOccluded ? 'hidden' : 'visible';
+            } else {
+                // Create new animation
+                const container = document.createElement('div');
+                container.className = 'node-lottie';
+                container.style.left = `${lottieX}px`;
+                container.style.top = `${lottieY}px`;
+                container.style.width = `${lottieSize}px`;
+                container.style.height = `${lottieSize}px`;
+                container.style.visibility = isOccluded ? 'hidden' : 'visible';
+                this.lottieOverlay.appendChild(container);
+
+                const animation = lottie.loadAnimation({
+                    container: container,
+                    renderer: 'svg',
+                    loop: true,
+                    autoplay: true,
+                    path: animPath
+                });
+
+                this.nodeLottieAnimations.set(node.id, { container, animation });
+            }
+        });
+    }
+
+    // Clear all node Lottie animations
+    clearNodeLottieAnimations() {
+        for (const [nodeId, animData] of this.nodeLottieAnimations) {
+            if (animData.animation) animData.animation.destroy();
+            if (animData.container) animData.container.remove();
+        }
+        this.nodeLottieAnimations.clear();
     }
 
     // Draw grid background
@@ -297,6 +432,46 @@ class CanvasRenderer {
         }
     }
 
+    // Check if a node is connected downstream from a "Users input" node
+    // Terminal nodes stop the glow flow - they don't glow and nodes after them don't glow
+    isConnectedFromUsersInput(node) {
+        if (!window.connectionManager) return false;
+
+        // Terminal nodes never glow - they stop the flow
+        if (node.type === 'Terminal') return false;
+
+        // If this node IS a Users input node
+        if (node.type === 'Users input') return true;
+
+        // Check if any upstream connection leads to a Users input node
+        const visited = new Set();
+        const queue = [node];
+
+        while (queue.length > 0) {
+            const current = queue.shift();
+            if (visited.has(current.id)) continue;
+            visited.add(current.id);
+
+            // Check each input of the current node
+            for (const input of current.inputs || []) {
+                if (input.connection) {
+                    const sourceNode = input.connection.outputNode;
+                    if (sourceNode) {
+                        // Terminal stops the glow - don't traverse past it
+                        if (sourceNode.type === 'Terminal') {
+                            continue;
+                        }
+                        if (sourceNode.type === 'Users input') {
+                            return true;
+                        }
+                        queue.push(sourceNode);
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
     // Draw individual node
     drawNode(ctx, node) {
         // Check if in chat mode and node is a chat type
@@ -311,8 +486,33 @@ class CanvasRenderer {
         const isHovered = this.hoveredNode === node;
         const isSelected = node.selected;
 
-        // Shadow for selected/hovered nodes
-        if (isSelected || isHovered) {
+        // Simulation mode states
+        const isExecuting = this.executingNodeId === node.id;
+        const isCompleted = this.completedNodeIds && this.completedNodeIds.includes(node.id);
+
+        // Check if this node is connected from Users input (special glow)
+        const isUsersInputFlow = this.isConnectedFromUsersInput(node);
+
+        // Shadow for selected/hovered/executing nodes
+        if (isUsersInputFlow && !isExecuting && !isCompleted) {
+            // Special golden glow for Users input flow
+            ctx.shadowColor = 'rgba(245, 158, 11, 0.6)';
+            ctx.shadowBlur = 15;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+        } else if (isExecuting) {
+            // Pulsing glow for executing node
+            const pulseAlpha = 0.5 + 0.5 * Math.sin(Date.now() / 200);
+            ctx.shadowColor = `rgba(95, 138, 247, ${pulseAlpha})`;
+            ctx.shadowBlur = 20;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+        } else if (isCompleted) {
+            ctx.shadowColor = 'rgba(97, 159, 131, 0.5)';
+            ctx.shadowBlur = 10;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+        } else if (isSelected || isHovered) {
             ctx.shadowColor = isSelected ? '#5a9fd4' : '#808080';
             ctx.shadowBlur = 10;
             ctx.shadowOffsetX = 0;
@@ -324,9 +524,24 @@ class CanvasRenderer {
         this.roundRect(ctx, node.x, node.y, node.width, node.height, 6);
         ctx.fill();
 
-        // Border
-        ctx.strokeStyle = isSelected ? '#5a9fd4' : (isHovered ? '#4a4a4a' : '#3a3a3a');
-        ctx.lineWidth = isSelected ? 2 : 1;
+        // Border - different colors for simulation states and special nodes
+        let borderColor = isSelected ? '#5a9fd4' : (isHovered ? '#4a4a4a' : '#3a3a3a');
+        let borderWidth = isSelected ? 2 : 1;
+
+        if (isExecuting) {
+            borderColor = '#5F8AF7';
+            borderWidth = 3;
+        } else if (isCompleted) {
+            borderColor = '#619F83';
+            borderWidth = 2;
+        } else if (isUsersInputFlow) {
+            // Golden border for Users input flow
+            borderColor = '#f59e0b';
+            borderWidth = 2;
+        }
+
+        ctx.strokeStyle = borderColor;
+        ctx.lineWidth = borderWidth;
         ctx.stroke();
 
         // Reset shadow
@@ -338,13 +553,15 @@ class CanvasRenderer {
         this.roundRect(ctx, node.x, node.y, node.width, 28, 6, true, false);
         ctx.fill();
 
-        // Title
+        // Title - offset to make room for Lottie animation if node has one
         ctx.fillStyle = '#ffffff';
         ctx.font = 'bold 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        const titleText = this.truncateText(ctx, node.title, node.width - 16);
-        ctx.fillText(titleText, node.x + 8, node.y + 14);
+        const hasAnimation = this.nodeAnimationPaths && this.nodeAnimationPaths[node.type];
+        const titleOffset = hasAnimation ? 32 : 8;
+        const titleText = this.truncateText(ctx, node.title, node.width - titleOffset - 8);
+        ctx.fillText(titleText, node.x + titleOffset, node.y + 14);
 
         // Draw ports
         this.drawPorts(ctx, node);
@@ -395,8 +612,8 @@ class CanvasRenderer {
         ctx.shadowColor = 'transparent';
         ctx.shadowBlur = 0;
 
-        // Draw text (dark color for readability on light backgrounds)
-        ctx.fillStyle = '#1a1a1a';
+        // Draw text - black for System/User (light bg), white for Idea (dark bg)
+        ctx.fillStyle = (node.type === 'SystemMessage' || node.type === 'UserMessage') ? '#000000' : '#ffffff';
         ctx.font = '12px Inter, -apple-system, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -698,6 +915,79 @@ class CanvasRenderer {
         data.forEach(nodeData => {
             const node = Node.fromJSON(nodeData);
             this.addNode(node);
+        });
+    }
+
+    // Center view on a specific node
+    centerOnNode(node) {
+        if (!node) return;
+
+        const nodeCenterX = node.x + node.width / 2;
+        const nodeCenterY = node.y + node.height / 2;
+
+        this.offsetX = this.canvas.width / 2 - nodeCenterX * this.scale;
+        this.offsetY = this.canvas.height / 2 - nodeCenterY * this.scale;
+
+        this.render();
+    }
+
+    // Draw simulation particles along connections
+    drawSimulationParticles(ctx, particles) {
+        particles.forEach(particle => {
+            const conn = particle.connection;
+            if (!conn) return;
+
+            // Get connection endpoints
+            const startPos = conn.outputNode.getOutputPosition(conn.outputIndex);
+            const endPos = conn.inputNode.getInputPosition(conn.inputIndex);
+
+            // Calculate bezier curve point
+            const t = particle.progress;
+            const cp1x = startPos.x + 50;
+            const cp1y = startPos.y;
+            const cp2x = endPos.x - 50;
+            const cp2y = endPos.y;
+
+            // Cubic bezier calculation
+            const x = Math.pow(1-t, 3) * startPos.x +
+                     3 * Math.pow(1-t, 2) * t * cp1x +
+                     3 * (1-t) * Math.pow(t, 2) * cp2x +
+                     Math.pow(t, 3) * endPos.x;
+
+            const y = Math.pow(1-t, 3) * startPos.y +
+                     3 * Math.pow(1-t, 2) * t * cp1y +
+                     3 * (1-t) * Math.pow(t, 2) * cp2y +
+                     Math.pow(t, 3) * endPos.y;
+
+            // Draw particle with glow
+            ctx.beginPath();
+            ctx.arc(x, y, 8, 0, Math.PI * 2);
+            ctx.fillStyle = '#5F8AF7';
+            ctx.shadowColor = '#5F8AF7';
+            ctx.shadowBlur = 15;
+            ctx.fill();
+
+            // Draw trail
+            for (let i = 1; i <= 5; i++) {
+                const trailT = Math.max(0, t - i * 0.02);
+                const trailX = Math.pow(1-trailT, 3) * startPos.x +
+                              3 * Math.pow(1-trailT, 2) * trailT * cp1x +
+                              3 * (1-trailT) * Math.pow(trailT, 2) * cp2x +
+                              Math.pow(trailT, 3) * endPos.x;
+                const trailY = Math.pow(1-trailT, 3) * startPos.y +
+                              3 * Math.pow(1-trailT, 2) * trailT * cp1y +
+                              3 * (1-trailT) * Math.pow(trailT, 2) * cp2y +
+                              Math.pow(trailT, 3) * endPos.y;
+
+                ctx.beginPath();
+                ctx.arc(trailX, trailY, 8 - i, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(95, 138, 247, ${0.6 - i * 0.1})`;
+                ctx.shadowBlur = 10 - i * 2;
+                ctx.fill();
+            }
+
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
         });
     }
 }
