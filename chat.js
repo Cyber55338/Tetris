@@ -449,31 +449,77 @@ function checkAndAwardGold(rootId, newLevel) {
 }
 
 // Typewriter effect for streaming text appearance
-let chatTypewriterIntervalId = null;
+// (Each element tracks its own interval via element._typewriterInterval for parallel support)
+
+// Track if user has manually scrolled away from bottom
+let chatUserScrolledAway = false;
+
+// Helper: Check if user is scrolled near the bottom of a container
+function isNearBottom(container, threshold = 50) {
+    if (!container) return true;
+    const scrollTop = container.scrollTop;
+    const scrollHeight = container.scrollHeight;
+    const clientHeight = container.clientHeight;
+    return (scrollHeight - scrollTop - clientHeight) < threshold;
+}
+
+// Helper: Smart scroll - only scroll to bottom if user hasn't scrolled away
+function smartScrollToBottom(container) {
+    if (container && !chatUserScrolledAway && isNearBottom(container)) {
+        container.scrollTop = container.scrollHeight;
+    }
+}
+
+// Setup scroll listener to track user scroll behavior
+function setupChatScrollListener() {
+    const container = document.getElementById('chat-conversation');
+    if (!container || container._scrollListenerAttached) return;
+
+    container.addEventListener('scroll', () => {
+        // If user scrolls away from bottom, remember it
+        if (!isNearBottom(container)) {
+            chatUserScrolledAway = true;
+        } else {
+            // If user scrolls back to bottom, reset the flag
+            chatUserScrolledAway = false;
+        }
+    });
+
+    container._scrollListenerAttached = true;
+}
+
+// Reset scroll tracking (call when starting new generation)
+function resetChatScrollTracking() {
+    chatUserScrolledAway = false;
+}
 
 function typewriterEffect(text, element, speed = 15) {
     return new Promise((resolve) => {
-        // Clear any existing typewriter
-        if (chatTypewriterIntervalId) {
-            clearInterval(chatTypewriterIntervalId);
+        // Clear any existing typewriter on THIS element (allows multiple parallel typewriters)
+        if (element._typewriterInterval) {
+            clearInterval(element._typewriterInterval);
         }
 
         element.textContent = '';
         element.classList.remove('generating');
         let i = 0;
 
-        chatTypewriterIntervalId = setInterval(() => {
+        // Use element-specific interval (allows multiple parallel typewriters)
+        element._typewriterInterval = setInterval(() => {
             if (i < text.length) {
                 element.textContent += text[i];
                 i++;
-                // Auto-scroll sidebar as text appears
-                const container = document.getElementById('chat-conversation');
-                if (container) {
-                    container.scrollTop = container.scrollHeight;
+                // Only auto-scroll if user hasn't scrolled away
+                // Check chatUserScrolledAway on EACH character (not just once at start)
+                if (!chatUserScrolledAway) {
+                    const container = document.getElementById('chat-conversation');
+                    if (container && isNearBottom(container)) {
+                        container.scrollTop = container.scrollHeight;
+                    }
                 }
             } else {
-                clearInterval(chatTypewriterIntervalId);
-                chatTypewriterIntervalId = null;
+                clearInterval(element._typewriterInterval);
+                element._typewriterInterval = null;
                 resolve();
             }
         }, speed);
@@ -549,6 +595,9 @@ function enterChatMode() {
     if (typeof isTasksMode === 'function' && isTasksMode() && typeof resetTasksModeState === 'function') {
         resetTasksModeState();
     }
+    if (typeof isMultiplayerMode === 'function' && isMultiplayerMode() && typeof resetMultiplayerModeState === 'function') {
+        resetMultiplayerModeState();
+    }
 
     // Hide tasks view container and section
     const tasksView = document.getElementById('tasks-view-container');
@@ -558,6 +607,9 @@ function enterChatMode() {
     document.getElementById('tasks-header')?.classList.remove('active');
 
     chatMode = true;
+
+    // Track current mode in localStorage for page refresh
+    localStorage.setItem('idea-engine-current-mode', 'chat');
 
     // Add body class for wider panel
     document.body.classList.add('chat-mode-active');
@@ -569,7 +621,8 @@ function enterChatMode() {
             connections: app.connectionManager.connections.map(conn => ({
                 output: { nodeId: conn.outputNode.id, index: conn.outputIndex },
                 input: { nodeId: conn.inputNode.id, index: conn.inputIndex }
-            }))
+            })),
+            annotations: app.annotationManager ? app.annotationManager.toJSON() : []
         };
     }
 
@@ -605,12 +658,16 @@ function enterChatMode() {
         if (el) el.style.display = 'none';
     });
 
+    // Hide Load button in chat mode
+    const btnLoad = document.getElementById('btn-load');
+    if (btnLoad) btnLoad.style.display = 'none';
+
     // Rename toolbar buttons for chat mode
     const btnNew = document.getElementById('btn-new');
     const btnSave = document.getElementById('btn-save');
     const btnClear = document.getElementById('btn-clear');
     if (btnNew) btnNew.lastChild.textContent = ' New Session';
-    if (btnSave) btnSave.lastChild.textContent = ' Download';
+    if (btnSave) btnSave.style.display = 'none'; // Hide Save/Download button in chat mode
     if (btnClear) btnClear.lastChild.textContent = ' Delete';
 
     // Override btn-new to create new session (not just clear canvas)
@@ -667,6 +724,9 @@ function enterChatMode() {
     // Transform properties panel to chat interface
     showChatPanel();
 
+    // Setup scroll listener to track user scroll behavior
+    setupChatScrollListener();
+
     // Rename Properties header to "Chat Tree"
     const propertiesHeader = document.querySelector('#properties-panel .sidebar-header h2');
     if (propertiesHeader) propertiesHeader.textContent = 'Chat Tree';
@@ -684,6 +744,9 @@ function exitChatMode() {
     // Save chat tree before exiting
     saveChatTreeData();
     chatMode = false;
+
+    // Track current mode in localStorage for page refresh
+    localStorage.setItem('idea-engine-current-mode', 'design-flow');
 
     // Hide gamification UI
     hideGamificationUI();
@@ -716,13 +779,18 @@ function exitChatMode() {
     const chatSection = document.getElementById('chat-section');
     if (chatSection) chatSection.style.display = 'none';
 
-    // Restore toolbar button texts
+    // Restore toolbar button texts and visibility
     const btnNew = document.getElementById('btn-new');
     const btnSave = document.getElementById('btn-save');
     const btnClear = document.getElementById('btn-clear');
+    const btnLoad = document.getElementById('btn-load');
     if (btnNew) btnNew.lastChild.textContent = ' New';
-    if (btnSave) btnSave.lastChild.textContent = ' Save';
+    if (btnSave) {
+        btnSave.style.display = '';
+        btnSave.lastChild.textContent = ' Save';
+    }
     if (btnClear) btnClear.lastChild.textContent = ' Clear';
+    if (btnLoad) btnLoad.style.display = '';
 
     // Remove chat mode handler from btn-new
     if (btnNew && btnNew._chatModeHandler) {
@@ -775,6 +843,14 @@ function exitChatMode() {
                     app.connectionManager.addConnection(outputNode, connData.output.index, inputNode, connData.input.index);
                 }
             });
+
+            // Restore Design Flow annotations
+            if (app.annotationManager) {
+                app.annotationManager.clearAnnotations();
+                if (previousDesignFlowStateChat.annotations && previousDesignFlowStateChat.annotations.length > 0) {
+                    app.annotationManager.fromJSON(previousDesignFlowStateChat.annotations);
+                }
+            }
 
             app.canvasRenderer.render();
             app.updateNodeCount();
@@ -928,8 +1004,8 @@ function renderConversation() {
         inlineGenerateBtn.addEventListener('click', generateGPTResponse);
     }
 
-    // Scroll to bottom
-    container.scrollTop = container.scrollHeight;
+    // Smart scroll - only scroll to bottom if user is already near bottom
+    smartScrollToBottom(container);
 }
 
 function escapeHtml(text) {
@@ -960,6 +1036,9 @@ function getNodeLineage(nodeId) {
 
 // ============ NODE OPERATIONS ============
 async function generateGPTResponse() {
+    // Reset scroll tracking at start of new generation
+    resetChatScrollTracking();
+
     if (!selectedChatNodeId) {
         if (typeof app !== 'undefined' && app.workflowManager) {
             app.workflowManager.showNotification('Please select a node first', 'warning');
@@ -1021,32 +1100,36 @@ async function generateGPTResponse() {
     }
     renderConversation();
 
-    // 5. Call API and typewriter each response
-    for (let i = 0; i < gptNodes.length; i++) {
-        // Select this node to show it in sidebar
-        app.canvasRenderer.selectNode(gptNodes[i]);
-        selectedChatNodeId = gptNodes[i].id;
-        renderConversation();
-
+    // 5. Call ALL APIs in PARALLEL and typewriter as each completes
+    const apiPromises = gptNodes.map(async (gptNode, i) => {
         try {
             const response = await chatAPI.generateResponse(messages, temperature);
-            gptNodes[i].properties.text = response;
+            gptNode.properties.text = response;
 
-            // Typewriter effect in sidebar
-            const msgElement = document.querySelector(`[data-node-id="${gptNodes[i].id}"] .chat-message-text`);
+            // Update canvas immediately when this response arrives
+            app.canvasRenderer.render();
+
+            // Typewriter starts as soon as THIS response arrives (runs in parallel with other typewriters)
+            const msgElement = document.querySelector(`[data-node-id="${gptNode.id}"] .chat-message-text`);
             if (msgElement) {
-                await typewriterEffect(response, msgElement, 12);
+                // Use slightly different speeds for visual variety
+                const speed = 10 + (i * 2);
+                await typewriterEffect(response, msgElement, speed);
             }
+
+            return { success: true, node: gptNode };
         } catch (error) {
-            gptNodes[i].properties.text = `Error: ${error.message}`;
+            gptNode.properties.text = `Error: ${error.message}`;
+            app.canvasRenderer.render();
             if (typeof app !== 'undefined' && app.workflowManager) {
                 app.workflowManager.showNotification(`API Error: ${error.message}`, 'error');
             }
+            return { success: false, node: gptNode, error };
         }
+    });
 
-        // Update canvas after each response
-        app.canvasRenderer.render();
-    }
+    // Wait for ALL responses to complete (they run in parallel)
+    await Promise.all(apiPromises);
 
     // 6. Final cleanup - restore button
     if (generateBtn) {
@@ -1133,7 +1216,7 @@ function generateSessionTitle(nodes) {
     return `Chat ${new Date().toLocaleDateString()}`;
 }
 
-function formatDate(timestamp) {
+function formatChatDate(timestamp) {
     const date = new Date(timestamp);
     return date.toLocaleDateString();
 }
@@ -1160,6 +1243,11 @@ function createNewSession() {
     // Clear canvas before creating new starter nodes
     app.canvasRenderer.nodes = [];
     app.connectionManager.connections = [];
+
+    // Clear annotations for new session
+    if (app.annotationManager) {
+        app.annotationManager.clearAnnotations();
+    }
 
     // Reset tree levels and gold for new session
     treeLevels = {};
@@ -1206,6 +1294,8 @@ function saveCurrentSession() {
         output: { nodeId: c.outputNode.id, index: c.outputIndex },
         input: { nodeId: c.inputNode.id, index: c.inputIndex }
     }));
+    // Save annotations with session
+    session.annotations = app.annotationManager ? app.annotationManager.toJSON() : [];
     if (!session.customTitle) {
         session.title = generateSessionTitle(session.nodes);
     }
@@ -1221,6 +1311,14 @@ function loadSessionToCanvas(session) {
 
     app.canvasRenderer.nodes = [];
     app.connectionManager.connections = [];
+
+    // Clear and load annotations for this session
+    if (app.annotationManager) {
+        app.annotationManager.clearAnnotations();
+        if (session.annotations && session.annotations.length > 0) {
+            app.annotationManager.fromJSON(session.annotations);
+        }
+    }
 
     if (session.nodes && session.nodes.length > 0) {
         session.nodes.forEach(nodeData => {
@@ -1431,7 +1529,7 @@ function renderChatHistory() {
         <div class="chat-session-item ${session.id === currentSessionId ? 'active' : ''}"
              data-session-id="${session.id}">
             <span class="session-title">${escapeHtml(session.title)}</span>
-            <span class="session-date">${formatDate(session.updatedAt)}</span>
+            <span class="session-date">${formatChatDate(session.updatedAt)}</span>
         </div>
     `).join('');
 

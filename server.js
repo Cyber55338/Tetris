@@ -45,7 +45,7 @@ const server = http.createServer((req, res) => {
 
                 // Prepare request to Claude API
                 const apiData = JSON.stringify({
-                    model: 'claude-sonnet-4-5-20250929',
+                    model: 'claude-opus-4-5-20251101',
                     max_tokens: 2000,
                     messages: [{
                         role: 'user',

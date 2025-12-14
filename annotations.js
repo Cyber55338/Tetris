@@ -35,6 +35,9 @@ class AnnotationManager {
 
         // Hand-drawn font (fallback to system fonts)
         this.fontFamily = "'Segoe Print', 'Bradley Hand', 'Chilanka', cursive, sans-serif";
+
+        // Clipboard for copy/paste
+        this.annotationClipboard = null;
     }
 
     // ============================================
@@ -315,6 +318,56 @@ class AnnotationManager {
     }
 
     /**
+     * Select all annotations within a rectangle (for marquee selection)
+     * @param {Object} rect - { x, y, width, height } in canvas coordinates
+     * @param {boolean} append - If true, add to existing selection; if false, clear first
+     */
+    selectAnnotationsInRect(rect, append = false) {
+        // Clear previous selection unless appending
+        if (!append) {
+            this.selectedAnnotations.forEach(ann => ann.selected = false);
+            this.selectedAnnotations = [];
+            this.selectedAnnotation = null;
+        }
+
+        const { x: rx, y: ry, width: rw, height: rh } = rect;
+        const rectRight = rx + rw;
+        const rectBottom = ry + rh;
+
+        this.annotations.forEach(ann => {
+            let annX, annY, annWidth, annHeight;
+
+            if (ann.type === 'text') {
+                annX = ann.x;
+                annY = ann.y;
+                const boxWidth = ann.width || 200;
+                annWidth = this.calculateActualTextWidth(ann.text, boxWidth, ann.fontSize);
+                annHeight = ann.height || this.calculateTextHeight(ann.text, boxWidth, ann.fontSize);
+            } else if (ann.type === 'arrow') {
+                // Use bounding box of arrow
+                annX = Math.min(ann.startX, ann.endX);
+                annY = Math.min(ann.startY, ann.endY);
+                annWidth = Math.abs(ann.endX - ann.startX);
+                annHeight = Math.abs(ann.endY - ann.startY);
+            }
+
+            // Check if annotation overlaps with selection rect
+            const annRight = annX + annWidth;
+            const annBottom = annY + annHeight;
+
+            const overlaps = !(annRight < rx || annX > rectRight || annBottom < ry || annY > rectBottom);
+
+            if (overlaps) {
+                ann.selected = true;
+                if (!this.selectedAnnotations.includes(ann)) {
+                    this.selectedAnnotations.push(ann);
+                }
+                this.selectedAnnotation = ann;
+            }
+        });
+    }
+
+    /**
      * Start dragging annotations (supports multi-selection)
      * @param {Object} annotation - The clicked annotation
      * @param {number} canvasX - Mouse X in canvas coords
@@ -355,10 +408,36 @@ class AnnotationManager {
     }
 
     /**
-     * Update annotation positions during drag (all selected)
+     * Initialize drag offsets for selected annotations (called when starting node drag for unified selection)
+     * @param {number} canvasX - Mouse X in canvas coords
+     * @param {number} canvasY - Mouse Y in canvas coords
      */
-    updateDragging(canvasX, canvasY) {
-        if (!this.isDraggingAnnotation || this.selectedAnnotations.length === 0) return;
+    initDragOffsets(canvasX, canvasY) {
+        this.dragOffsets.clear();
+        this.selectedAnnotations.forEach(ann => {
+            if (ann.type === 'text') {
+                this.dragOffsets.set(ann, {
+                    x: canvasX - ann.x,
+                    y: canvasY - ann.y
+                });
+            } else if (ann.type === 'arrow') {
+                this.dragOffsets.set(ann, {
+                    startX: canvasX - ann.startX,
+                    startY: canvasY - ann.startY,
+                    endX: canvasX - ann.endX,
+                    endY: canvasY - ann.endY
+                });
+            }
+        });
+    }
+
+    /**
+     * Update annotation positions during drag (all selected)
+     * @param {boolean} forceUpdate - If true, update even if not dragging annotation (for unified drag)
+     */
+    updateDragging(canvasX, canvasY, forceUpdate = false) {
+        if (!forceUpdate && !this.isDraggingAnnotation) return;
+        if (this.selectedAnnotations.length === 0) return;
 
         // Move all selected annotations
         this.selectedAnnotations.forEach(ann => {
@@ -444,7 +523,8 @@ class AnnotationManager {
             x: annotation.x,
             y: annotation.y,
             width: boxWidth,
-            height: boxHeight
+            height: boxHeight,
+            fontSize: annotation.fontSize || 18  // Store original font size for scaling
         };
 
         this.selectAnnotation(annotation);
@@ -452,6 +532,9 @@ class AnnotationManager {
 
     /**
      * Update text annotation size during resize drag
+     * CORNERS (nw, ne, sw, se) = Scale font size
+     * EDGES (e, w) = Change box width (text layout/wrapping)
+     * EDGES (n, s) = No effect (height is auto-calculated)
      */
     updateTextResize(mouseX, mouseY) {
         if (!this.isResizingText || !this.selectedAnnotation || !this.resizeStartBounds) return;
@@ -460,44 +543,74 @@ class AnnotationManager {
         const start = this.resizeStartBounds;
         const dx = mouseX - this.resizeStartMouse.x;
         const dy = mouseY - this.resizeStartMouse.y;
-        const minWidth = 50;
-        const minHeight = ann.fontSize * 1.2;
 
-        // Apply resize based on handle position
+        // Font size bounds
+        const minFontSize = 10;
+        const maxFontSize = 72;
+        const minWidth = 50;
+
         switch (this.resizeHandle) {
-            case 'e':
+            // CORNER HANDLES - Scale font size
+            case 'se': // Bottom-right - drag out to enlarge
+                const diagonalSE = Math.sqrt(dx * dx + dy * dy);
+                const signSE = (dx + dy) > 0 ? 1 : -1;
+                const scaleFactorSE = 1 + (signSE * diagonalSE) / 200;
+                const newFontSizeSE = Math.max(minFontSize, Math.min(maxFontSize, start.fontSize * scaleFactorSE));
+                ann.fontSize = Math.round(newFontSizeSE);
+                // Width scales proportionally with font size
+                const fontScaleSE = ann.fontSize / start.fontSize;
+                ann.width = Math.max(minWidth, start.width * fontScaleSE);
+                break;
+
+            case 'nw': // Top-left - drag in to enlarge
+                const diagonalNW = Math.sqrt(dx * dx + dy * dy);
+                const signNW = (dx + dy) < 0 ? 1 : -1;
+                const scaleFactorNW = 1 + (signNW * diagonalNW) / 200;
+                const newFontSizeNW = Math.max(minFontSize, Math.min(maxFontSize, start.fontSize * scaleFactorNW));
+                ann.fontSize = Math.round(newFontSizeNW);
+                const fontScaleNW = ann.fontSize / start.fontSize;
+                ann.width = Math.max(minWidth, start.width * fontScaleNW);
+                break;
+
+            case 'ne': // Top-right
+                const diagonalNE = Math.sqrt(dx * dx + dy * dy);
+                const signNE = (dx - dy) > 0 ? 1 : -1;
+                const scaleFactorNE = 1 + (signNE * diagonalNE) / 200;
+                const newFontSizeNE = Math.max(minFontSize, Math.min(maxFontSize, start.fontSize * scaleFactorNE));
+                ann.fontSize = Math.round(newFontSizeNE);
+                const fontScaleNE = ann.fontSize / start.fontSize;
+                ann.width = Math.max(minWidth, start.width * fontScaleNE);
+                break;
+
+            case 'sw': // Bottom-left
+                const diagonalSW = Math.sqrt(dx * dx + dy * dy);
+                const signSW = (-dx + dy) > 0 ? 1 : -1;
+                const scaleFactorSW = 1 + (signSW * diagonalSW) / 200;
+                const newFontSizeSW = Math.max(minFontSize, Math.min(maxFontSize, start.fontSize * scaleFactorSW));
+                ann.fontSize = Math.round(newFontSizeSW);
+                const fontScaleSW = ann.fontSize / start.fontSize;
+                ann.width = Math.max(minWidth, start.width * fontScaleSW);
+                break;
+
+            // EDGE HANDLES - Change box width (layout), NOT font size
+            case 'e': // Right edge - increase width
                 ann.width = Math.max(minWidth, start.width + dx);
                 break;
-            case 'w':
+
+            case 'w': // Left edge - decrease width (and shift position)
                 const newWidthW = Math.max(minWidth, start.width - dx);
                 ann.x = start.x + (start.width - newWidthW);
                 ann.width = newWidthW;
                 break;
-            case 's':
-                // Height is auto-calculated based on content, so just widen slightly
-                break;
+
+            // N/S edges - no effect (height is auto-calculated from content)
             case 'n':
-                // Height is auto-calculated, so this is a no-op for now
-                break;
-            case 'se':
-                ann.width = Math.max(minWidth, start.width + dx);
-                break;
-            case 'sw':
-                const newWidthSW = Math.max(minWidth, start.width - dx);
-                ann.x = start.x + (start.width - newWidthSW);
-                ann.width = newWidthSW;
-                break;
-            case 'ne':
-                ann.width = Math.max(minWidth, start.width + dx);
-                break;
-            case 'nw':
-                const newWidthNW = Math.max(minWidth, start.width - dx);
-                ann.x = start.x + (start.width - newWidthNW);
-                ann.width = newWidthNW;
+            case 's':
+                // No-op: height is determined by text content
                 break;
         }
 
-        // Recalculate height based on new width
+        // Recalculate height based on current width and font size
         ann.height = this.calculateTextHeight(ann.text, ann.width, ann.fontSize);
     }
 
@@ -572,10 +685,12 @@ class AnnotationManager {
     isPointInText(x, y, annotation) {
         const boxWidth = annotation.width || 200;
         const boxHeight = annotation.height || this.calculateTextHeight(annotation.text, boxWidth, annotation.fontSize);
+        // Use actual text width for tighter hit detection
+        const actualWidth = this.calculateActualTextWidth(annotation.text, boxWidth, annotation.fontSize);
         const padding = 5;
 
         return x >= annotation.x - padding &&
-               x <= annotation.x + boxWidth + padding &&
+               x <= annotation.x + actualWidth + padding &&
                y >= annotation.y - padding &&
                y <= annotation.y + boxHeight + padding;
     }
@@ -627,14 +742,16 @@ class AnnotationManager {
         if (annotation.type !== 'text') return null;
         if (!annotation.selected) return null;
 
-        const { x: ax, y: ay, width, height, fontSize } = annotation;
+        const { x: ax, y: ay, width, height, fontSize, text } = annotation;
         const boxWidth = width || 200;
-        const boxHeight = height || this.calculateTextHeight(annotation.text, boxWidth, fontSize);
+        const boxHeight = height || this.calculateTextHeight(text, boxWidth, fontSize);
+        // Use actual text width for handle positions
+        const actualWidth = this.calculateActualTextWidth(text, boxWidth, fontSize);
         const padding = 4;
 
-        // Calculate bounds
+        // Calculate bounds using actual text width
         const left = ax - padding;
-        const right = ax + boxWidth + padding;
+        const right = ax + actualWidth + padding;
         const top = ay - padding;
         const bottom = ay + boxHeight + padding;
         const centerX = (left + right) / 2;
@@ -715,6 +832,28 @@ class AnnotationManager {
         return lines.length * lineHeight;
     }
 
+    /**
+     * Calculate the actual width of rendered text (widest line)
+     * Used for tight-fitting selection box
+     */
+    calculateActualTextWidth(text, maxWidth, fontSize) {
+        if (!text || text.trim() === '') return 50; // Minimum width
+
+        const ctx = this.ctx;
+        ctx.font = `${fontSize}px ${this.fontFamily}`;
+
+        const lines = this.wrapText(text, maxWidth, fontSize);
+        let maxLineWidth = 0;
+
+        lines.forEach(line => {
+            const metrics = ctx.measureText(line);
+            maxLineWidth = Math.max(maxLineWidth, metrics.width);
+        });
+
+        // Return actual width with a small buffer, minimum 50px
+        return Math.max(50, maxLineWidth + 4);
+    }
+
     // ============================================
     // RENDERING
     // ============================================
@@ -774,11 +913,14 @@ class AnnotationManager {
         if (selected) {
             const padding = 4;
 
-            // Hand-drawn selection rectangle using RoughJS
+            // Calculate actual text width for tight-fitting selection box
+            const actualTextWidth = this.calculateActualTextWidth(text, boxWidth, fontSize);
+
+            // Hand-drawn selection rectangle using RoughJS - fits actual text
             this.rough.rectangle(
                 x - padding,
                 y - padding,
-                boxWidth + padding * 2,
+                actualTextWidth + padding * 2,
                 textHeight + padding * 2,
                 {
                     stroke: '#5a9fd4',
@@ -789,8 +931,8 @@ class AnnotationManager {
                 }
             );
 
-            // Draw resize handles
-            this.drawTextResizeHandles(ctx, annotation, boxWidth, textHeight);
+            // Draw resize handles - also use actual text width
+            this.drawTextResizeHandles(ctx, annotation, actualTextWidth, textHeight);
         }
 
         ctx.restore();
@@ -934,6 +1076,92 @@ class AnnotationManager {
 
         // Draw arrowhead
         this.drawArrowhead(startX, startY, endX, endY, 'rgba(255, 255, 255, 0.7)', 2, 1.5);
+    }
+
+    // ============================================
+    // COPY / PASTE
+    // ============================================
+
+    /**
+     * Copy selected annotations to clipboard
+     * @returns {boolean} True if annotations were copied
+     */
+    copySelectedAnnotations() {
+        if (this.selectedAnnotations.length === 0) return false;
+
+        // Calculate center of selection for relative positioning on paste
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        this.selectedAnnotations.forEach(ann => {
+            if (ann.type === 'text') {
+                minX = Math.min(minX, ann.x);
+                minY = Math.min(minY, ann.y);
+                maxX = Math.max(maxX, ann.x + (ann.width || 200));
+                maxY = Math.max(maxY, ann.y + (ann.height || 50));
+            } else if (ann.type === 'arrow') {
+                minX = Math.min(minX, ann.startX, ann.endX);
+                minY = Math.min(minY, ann.startY, ann.endY);
+                maxX = Math.max(maxX, ann.startX, ann.endX);
+                maxY = Math.max(maxY, ann.startY, ann.endY);
+            }
+        });
+
+        this.annotationClipboard = {
+            annotations: this.selectedAnnotations.map(ann => ({ ...ann })),
+            center: { x: (minX + maxX) / 2, y: (minY + maxY) / 2 }
+        };
+        return true;
+    }
+
+    /**
+     * Paste annotations from clipboard at target position
+     * @param {number} targetX - X position to paste at
+     * @param {number} targetY - Y position to paste at
+     * @returns {boolean} True if annotations were pasted
+     */
+    pasteAnnotations(targetX, targetY) {
+        if (!this.annotationClipboard || this.annotationClipboard.annotations.length === 0) return false;
+
+        const dx = targetX - this.annotationClipboard.center.x;
+        const dy = targetY - this.annotationClipboard.center.y;
+
+        // Deselect current
+        this.deselectAll();
+
+        // Create new annotations with offset positions and new IDs
+        this.annotationClipboard.annotations.forEach(ann => {
+            const newAnn = { ...ann };
+            newAnn.id = `ann_${ann.type}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            newAnn.selected = true;
+
+            if (newAnn.type === 'text') {
+                newAnn.x += dx;
+                newAnn.y += dy;
+            } else if (newAnn.type === 'arrow') {
+                newAnn.startX += dx;
+                newAnn.startY += dy;
+                newAnn.endX += dx;
+                newAnn.endY += dy;
+            }
+
+            this.annotations.push(newAnn);
+            this.selectedAnnotations.push(newAnn);
+        });
+
+        this.selectedAnnotation = this.selectedAnnotations[this.selectedAnnotations.length - 1];
+
+        // Save changes
+        if (typeof saveCurrentJournalCanvas === 'function') {
+            saveCurrentJournalCanvas();
+        }
+        return true;
+    }
+
+    /**
+     * Check if clipboard has annotations
+     * @returns {boolean} True if clipboard has annotations
+     */
+    hasClipboard() {
+        return this.annotationClipboard && this.annotationClipboard.annotations.length > 0;
     }
 
     // ============================================

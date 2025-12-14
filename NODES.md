@@ -334,6 +334,25 @@ General purpose utility nodes for media and content.
   | command | text | `""` |
   | output | text | `""` |
 
+### Generate key
+- **Color:** `#06b6d4` (Cyan)
+- **Inputs:** input (ANY)
+- **Outputs:** output (ANY)
+- **Properties:**
+  | Property | Type | Default |
+  |----------|------|---------|
+  | sha256 | string | `""` |
+
+### Questionnaire (test)
+- **Color:** `#a855f7` (Purple)
+- **Inputs:** input (ANY)
+- **Outputs:** output (ANY)
+- **Properties:**
+  | Property | Type | Default |
+  |----------|------|---------|
+  | question | text | `""` |
+  | answer | text | `""` |
+
 ---
 
 ## Summary
@@ -344,8 +363,8 @@ General purpose utility nodes for media and content.
 | Perception Graph | 9 | Dreams, Goals, Rules, Memories, Questions, Expressions, Instructions, Problem, Danger |
 | Hero Journey | 3 | Hero, Mentor, Villain |
 | Social | 4 | Friends, Family, Co-workers, Lovers |
-| Utility | 4 | Picture, Text, Video, Terminal |
-| **Total** | **25** | |
+| Utility | 6 | Picture, Text, Video, Terminal, Generate key, Questionnaire (test) |
+| **Total** | **27** | |
 
 ---
 

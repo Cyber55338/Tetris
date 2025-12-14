@@ -234,15 +234,64 @@ body {
 .smartwatch-status {
     font-size: 12px;
     font-weight: 600;
+    color: #ffffff;
 }
 
 .smartwatch-status.disconnected {
-    color: #ef4444;
+    color: #ffffff;
 }
 
 .smartwatch-status.connected {
+    color: #ffffff;
+    font-weight: 600;
+}
+
+/* Smartwatch checkmark - hidden by default */
+.toolbar-btn.btn-smartwatch .watch-connect-icon {
+    display: none;
+}
+
+/* Show checkmark when connected */
+.toolbar-btn.btn-smartwatch.connected .watch-connect-icon {
+    display: inline-block;
     color: #10b981;
-    font-weight: 700;
+}
+
+/* AI Model Selector Button */
+.toolbar-btn.btn-model-selector {
+    gap: 6px;
+    padding: 6px 10px;
+    min-width: auto;
+}
+
+.toolbar-btn.btn-model-selector .model-name-display {
+    font-size: 12px;
+    font-weight: 600;
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #ffffff;
+}
+
+.toolbar-btn.btn-model-selector:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-light);
+}
+
+.toolbar-btn.btn-model-selector:hover .model-name-display {
+    color: #ffffff;
+}
+
+/* Model button checkmark - hidden by default */
+.toolbar-btn.btn-model-selector .model-connect-icon {
+    display: none;
+}
+
+/* Show checkmark when connected (has API key) */
+.toolbar-btn.btn-model-selector.connected .model-connect-icon {
+    display: inline-block;
+    color: #10b981;
 }
 
 /* Connection Status Indicator (for Tasks mode read-only) */
@@ -4603,6 +4652,75 @@ body.simulation-mode-active .canvas-info {
     font-size: 12px;
 }
 
+/* Agent Configuration Tab */
+.agent-config-section {
+    padding: 16px;
+}
+
+.agent-config-group {
+    margin-bottom: 16px;
+}
+
+.agent-config-label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.agent-config-select,
+.agent-config-input {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 13px;
+    box-sizing: border-box;
+}
+
+.agent-config-select:focus,
+.agent-config-input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+.agent-config-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 6px;
+    margin-bottom: 0;
+}
+
+.agent-config-save-btn {
+    width: 100%;
+    padding: 10px;
+    background: var(--accent-primary);
+    border: none;
+    border-radius: 6px;
+    color: white;
+    font-size: 13px;
+    cursor: pointer;
+    margin-top: 8px;
+    transition: opacity 0.2s;
+}
+
+.agent-config-save-btn:hover {
+    opacity: 0.9;
+}
+
+.agent-config-status {
+    font-size: 12px;
+    text-align: center;
+    margin-top: 8px;
+    min-height: 18px;
+}
+
+.agent-config-status.success {
+    color: #10b981;
+}
+
 /* Agent Thread List */
 .agent-thread-list {
     flex: 1;
@@ -4852,6 +4970,327 @@ body.simulation-mode-active .canvas-info {
     padding: 12px 20px;
     border-top: 1px solid var(--border-color);
     display: flex;
+    justify-content: flex-end;
+}
+
+/* ============================================
+   AI MODEL SELECTOR POPUP
+   ============================================ */
+
+.model-selector-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    transition: opacity 0.2s, visibility 0.2s;
+}
+
+.model-selector-overlay.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.model-selector-popup {
+    background: var(--bg-primary);
+    border-radius: 12px;
+    padding: 0;
+    min-width: 320px;
+    max-width: 400px;
+    max-height: 80vh;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.model-selector-header {
+    padding: 16px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+}
+
+.model-selector-list {
+    flex: 1;
+    overflow-y: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.model-selector-list::-webkit-scrollbar {
+    display: none;
+}
+
+/* Provider Group */
+.model-provider-group {
+    border-bottom: 1px solid var(--border-color);
+}
+
+.model-provider-group:last-child {
+    border-bottom: none;
+}
+
+.model-provider-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 20px;
+    background: var(--bg-tertiary);
+    cursor: pointer;
+    user-select: none;
+}
+
+.model-provider-header:hover {
+    background: var(--bg-hover);
+}
+
+.model-provider-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.model-provider-icon {
+    font-size: 18px;
+    width: 24px;
+    text-align: center;
+}
+
+.model-provider-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* API Key Status Indicator */
+.model-provider-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.api-key-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #666;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.api-key-indicator:hover {
+    transform: scale(1.3);
+    box-shadow: 0 0 8px rgba(102, 102, 102, 0.5);
+}
+
+.api-key-indicator.configured {
+    background: #10b981;
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+}
+
+.api-key-indicator.configured:hover {
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.8);
+}
+
+.model-provider-chevron {
+    color: var(--text-muted);
+    transition: transform 0.2s;
+}
+
+.model-provider-group.collapsed .model-provider-chevron {
+    transform: rotate(-90deg);
+}
+
+/* Model Items */
+.model-items-container {
+    padding: 0;
+}
+
+.model-provider-group.collapsed .model-items-container {
+    display: none;
+}
+
+.model-selector-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 20px 10px 44px;
+    cursor: pointer;
+    transition: background 0.2s;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.model-selector-item:last-child {
+    border-bottom: none;
+}
+
+.model-selector-item:hover {
+    background: var(--bg-hover);
+}
+
+.model-selector-item.selected {
+    background: rgba(16, 185, 129, 0.1);
+}
+
+.model-selector-item-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.model-selector-item-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.model-selector-item-tier {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: capitalize;
+}
+
+.model-selector-item-status {
+    display: flex;
+    align-items: center;
+}
+
+.model-checkmark {
+    color: #10b981;
+    opacity: 0;
+}
+
+.model-selector-item.selected .model-checkmark {
+    opacity: 1;
+}
+
+.model-selector-actions {
+    padding: 12px 20px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: flex-end;
+}
+
+/* ============================================
+   API KEY INPUT MODAL
+   ============================================ */
+
+.api-key-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1001;
+    transition: opacity 0.2s, visibility 0.2s;
+}
+
+.api-key-modal-overlay.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.api-key-modal-popup {
+    background: var(--bg-primary);
+    border-radius: 12px;
+    padding: 0;
+    width: 400px;
+    max-width: 90vw;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+}
+
+.api-key-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+}
+
+.api-key-modal-header span {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.api-key-modal-close {
+    background: none;
+    border: none;
+    font-size: 20px;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+
+.api-key-modal-close:hover {
+    color: var(--text-primary);
+}
+
+.api-key-modal-content {
+    padding: 20px;
+}
+
+.api-key-modal-description {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+}
+
+.api-key-input {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: monospace;
+}
+
+.api-key-input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+.api-key-modal-hint {
+    margin-top: 12px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.api-key-modal-hint a {
+    color: var(--accent-primary);
+    text-decoration: none;
+}
+
+.api-key-modal-hint a:hover {
+    text-decoration: underline;
+}
+
+.api-key-modal-actions {
+    padding: 16px 20px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    gap: 10px;
     justify-content: flex-end;
 }
 
@@ -5762,44 +6201,14 @@ body.simulation-mode-active .canvas-info {
     border-radius: 4px;
 }
 
-/* Annotation Context Menu */
-#annotation-context-menu {
-    position: fixed;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-light);
-    border-radius: 6px;
-    padding: 4px 0;
-    min-width: 180px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    z-index: 1000;
-}
+/* Annotation Context Menu - Consistent with node context menu */
+/* Inherits all base styles from .context-menu class */
+/* All text is white (same as node menu) for consistency */
 
 #annotation-context-menu .context-menu-item {
-    padding: 8px 16px;
-    cursor: pointer;
-    font-size: 13px;
-    color: var(--text-primary);
     display: flex;
     align-items: center;
     gap: 8px;
-}
-
-#annotation-context-menu .context-menu-item:hover {
-    background: var(--bg-hover);
-}
-
-#annotation-context-menu .context-menu-item[data-action^="convert-to"] {
-    color: #f59e0b;
-}
-
-#annotation-context-menu .context-menu-item[data-action="delete-annotation"] {
-    color: #ef4444;
-}
-
-#annotation-context-menu .context-menu-separator {
-    height: 1px;
-    background: var(--border-light);
-    margin: 4px 0;
 }
 
 /* Resize cursors for text annotation handles */

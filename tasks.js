@@ -403,7 +403,7 @@ function renderTodoCard(todo) {
                 <div class="task-card-content">
                     <div class="task-card-title">${escapeHtml(todo.title)}</div>
                     ${todo.notes ? `<div class="task-card-notes">${escapeHtml(todo.notes)}</div>` : ''}
-                    ${todo.dueDate ? `<div class="task-due-date ${isOverdue ? 'overdue' : ''}">Due: ${formatDate(todo.dueDate)}</div>` : ''}
+                    ${todo.dueDate ? `<div class="task-due-date ${isOverdue ? 'overdue' : ''}">Due: ${formatTaskDate(todo.dueDate)}</div>` : ''}
                 </div>
             </div>
         </div>
@@ -482,7 +482,7 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-function formatDate(dateStr) {
+function formatTaskDate(dateStr) {
     const date = new Date(dateStr);
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
@@ -503,6 +503,9 @@ function enterTasksMode() {
     }
     if (typeof exitAgentMode === 'function' && typeof isAgentMode === 'function' && isAgentMode()) {
         exitAgentMode();
+    }
+    if (typeof resetMultiplayerModeState === 'function' && typeof isMultiplayerMode === 'function' && isMultiplayerMode()) {
+        resetMultiplayerModeState();
     }
 
     // Clean up any leftover UI from other modes
@@ -559,7 +562,6 @@ function enterTasksMode() {
     const btnSave = document.getElementById('btn-save');
     const btnClear = document.getElementById('btn-clear');
     const btnLoad = document.getElementById('btn-load');
-    const btnDownload = document.getElementById('btn-download');
     const btnZoomIn = document.getElementById('btn-zoom-in');
     const btnZoomOut = document.getElementById('btn-zoom-out');
     const btnFitView = document.getElementById('btn-fit-view');
@@ -570,7 +572,6 @@ function enterTasksMode() {
     if (btnSave) btnSave.style.display = 'none';
     if (btnClear) btnClear.style.display = 'none';
     if (btnLoad) btnLoad.style.display = 'none';
-    if (btnDownload) btnDownload.style.display = 'none';
     if (btnZoomIn) btnZoomIn.style.display = 'none';
     if (btnZoomOut) btnZoomOut.style.display = 'none';
     if (btnFitView) btnFitView.style.display = 'none';
@@ -622,7 +623,6 @@ function exitTasksMode() {
     const btnSave = document.getElementById('btn-save');
     const btnClear = document.getElementById('btn-clear');
     const btnLoad = document.getElementById('btn-load');
-    const btnDownload = document.getElementById('btn-download');
     const btnZoomIn = document.getElementById('btn-zoom-in');
     const btnZoomOut = document.getElementById('btn-zoom-out');
     const btnFitView = document.getElementById('btn-fit-view');
@@ -633,7 +633,6 @@ function exitTasksMode() {
     if (btnSave) btnSave.style.display = '';
     if (btnClear) btnClear.style.display = '';
     if (btnLoad) btnLoad.style.display = '';
-    if (btnDownload) btnDownload.style.display = '';
     if (btnZoomIn) btnZoomIn.style.display = '';
     if (btnZoomOut) btnZoomOut.style.display = '';
     if (btnFitView) btnFitView.style.display = '';
@@ -679,7 +678,6 @@ function resetTasksModeState() {
     const btnSave = document.getElementById('btn-save');
     const btnClear = document.getElementById('btn-clear');
     const btnLoad = document.getElementById('btn-load');
-    const btnDownload = document.getElementById('btn-download');
     const btnZoomIn = document.getElementById('btn-zoom-in');
     const btnZoomOut = document.getElementById('btn-zoom-out');
     const btnFitView = document.getElementById('btn-fit-view');
@@ -690,7 +688,6 @@ function resetTasksModeState() {
     if (btnSave) btnSave.style.display = '';
     if (btnClear) btnClear.style.display = '';
     if (btnLoad) btnLoad.style.display = '';
-    if (btnDownload) btnDownload.style.display = '';
     if (btnZoomIn) btnZoomIn.style.display = '';
     if (btnZoomOut) btnZoomOut.style.display = '';
     if (btnFitView) btnFitView.style.display = '';
@@ -897,3 +894,6 @@ exitTasksMode = function() {
     stopDistributionTimer();
     originalExitTasksMode();
 };
+
+// Export isTasksMode to window
+window.isTasksMode = isTasksMode;

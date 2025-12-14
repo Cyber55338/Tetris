@@ -132,6 +132,9 @@ function enterAgentMode() {
     if (typeof resetTasksModeState === 'function' && typeof isTasksMode === 'function' && isTasksMode()) {
         resetTasksModeState();
     }
+    if (typeof resetMultiplayerModeState === 'function' && typeof isMultiplayerMode === 'function' && isMultiplayerMode()) {
+        resetMultiplayerModeState();
+    }
 
     // Clean up any leftover UI from other modes
     if (typeof cleanupAllModeUI === 'function') {
@@ -181,10 +184,8 @@ function enterAgentMode() {
     if (simulateBtn) simulateBtn.style.display = 'none';
     if (sendBtn) sendBtn.style.display = 'none';
 
-    // Hide Download and Load buttons
-    const btnDownload = document.getElementById('btn-download');
+    // Hide Load button
     const btnLoad = document.getElementById('btn-load');
-    if (btnDownload) btnDownload.style.display = 'none';
     if (btnLoad) btnLoad.style.display = 'none';
 
     // Load data and render
@@ -229,10 +230,8 @@ function exitAgentMode() {
     if (simulateBtn) simulateBtn.style.display = '';
     if (sendBtn) sendBtn.style.display = '';
 
-    // Restore Download and Load buttons
-    const btnDownload = document.getElementById('btn-download');
+    // Restore Load button
     const btnLoad = document.getElementById('btn-load');
-    if (btnDownload) btnDownload.style.display = '';
     if (btnLoad) btnLoad.style.display = '';
 
     // Restore previous Design Flow state
@@ -385,12 +384,27 @@ function renderAgentSidebar() {
 
             <!-- Configuration Tab -->
             <div class="agent-tab-content" id="agent-tab-config">
-                <div class="agent-tab-placeholder">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <circle cx="12" cy="12" r="3"/>
-                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                    </svg>
-                    <span>Configuration coming soon</span>
+                <div class="agent-config-section">
+                    <div class="agent-config-group">
+                        <label class="agent-config-label">API Key Source</label>
+                        <select id="agent-api-source" class="agent-config-select">
+                            <option value="owner">Provided by me</option>
+                            <option value="recipient">Provided by recipient</option>
+                        </select>
+                    </div>
+
+                    <div class="agent-config-group" id="agent-api-key-group">
+                        <label class="agent-config-label">API Key</label>
+                        <input type="password" id="agent-api-key-input"
+                               class="agent-config-input"
+                               placeholder="Enter API key...">
+                        <p class="agent-config-hint" id="agent-api-hint">Your API key will be used for this agent</p>
+                    </div>
+
+                    <button id="agent-save-config" class="agent-config-save-btn">
+                        Save Configuration
+                    </button>
+                    <div id="agent-config-status" class="agent-config-status"></div>
                 </div>
             </div>
         </div>
@@ -420,6 +434,9 @@ function renderAgentSidebar() {
             switchAgentTab(tabName);
         });
     });
+
+    // Setup configuration tab listeners
+    setupAgentConfigListeners();
 }
 
 function switchAgentTab(tabName) {
@@ -436,6 +453,85 @@ function switchAgentTab(tabName) {
     });
     const activeContent = document.getElementById(`agent-tab-${tabName}`);
     if (activeContent) activeContent.classList.add('active');
+
+    // Load config when switching to config tab
+    if (tabName === 'config' && currentAgentId) {
+        loadAgentConfig(currentAgentId);
+    }
+}
+
+// ============================================
+// Agent Configuration Functions
+// ============================================
+
+function loadAgentConfig(agentId) {
+    const configs = JSON.parse(localStorage.getItem('idea-engine-agent-configs') || '{}');
+    const config = configs[agentId] || { apiSource: 'owner', apiKey: '' };
+
+    const sourceSelect = document.getElementById('agent-api-source');
+    const keyInput = document.getElementById('agent-api-key-input');
+
+    if (sourceSelect) sourceSelect.value = config.apiSource;
+    if (keyInput) keyInput.value = config.apiKey;
+
+    updateApiHint(config.apiSource);
+}
+
+function saveAgentConfig(agentId) {
+    const sourceSelect = document.getElementById('agent-api-source');
+    const keyInput = document.getElementById('agent-api-key-input');
+
+    const configs = JSON.parse(localStorage.getItem('idea-engine-agent-configs') || '{}');
+    configs[agentId] = {
+        apiSource: sourceSelect?.value || 'owner',
+        apiKey: keyInput?.value || ''
+    };
+
+    localStorage.setItem('idea-engine-agent-configs', JSON.stringify(configs));
+
+    // Show success status
+    const statusEl = document.getElementById('agent-config-status');
+    if (statusEl) {
+        statusEl.textContent = '✓ Configuration saved';
+        statusEl.className = 'agent-config-status success';
+        setTimeout(() => {
+            statusEl.textContent = '';
+            statusEl.className = 'agent-config-status';
+        }, 2000);
+    }
+}
+
+function updateApiHint(source) {
+    const hint = document.getElementById('agent-api-hint');
+    const keyInput = document.getElementById('agent-api-key-input');
+
+    if (source === 'owner') {
+        if (hint) hint.textContent = 'Your API key will be used for this agent';
+        if (keyInput) keyInput.placeholder = 'Enter your API key...';
+    } else {
+        if (hint) hint.textContent = 'Users will need to provide their own API key to use this agent';
+        if (keyInput) keyInput.placeholder = 'Leave empty - user will provide';
+    }
+}
+
+function setupAgentConfigListeners() {
+    // API source dropdown change
+    const apiSourceSelect = document.getElementById('agent-api-source');
+    if (apiSourceSelect) {
+        apiSourceSelect.addEventListener('change', (e) => {
+            updateApiHint(e.target.value);
+        });
+    }
+
+    // Save button click
+    const saveConfigBtn = document.getElementById('agent-save-config');
+    if (saveConfigBtn) {
+        saveConfigBtn.addEventListener('click', () => {
+            if (currentAgentId) {
+                saveAgentConfig(currentAgentId);
+            }
+        });
+    }
 }
 
 function getDefaultAvatarSVG() {
@@ -788,9 +884,7 @@ function resetAgentModeState() {
     agentMode = false;
 
     // Restore buttons that enterAgentMode() hid
-    const btnDownload = document.getElementById('btn-download');
     const btnLoad = document.getElementById('btn-load');
-    if (btnDownload) btnDownload.style.display = '';
     if (btnLoad) btnLoad.style.display = '';
 
     // Hide agent section and show canvas

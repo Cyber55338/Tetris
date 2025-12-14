@@ -1,5 +1,18 @@
 // Main Application - ComfyUI Clone
 
+// Helper: Check if annotations are enabled (Journals, Design Flow, OR Chat mode)
+// Annotations are disabled in Agent, Tasks, and Multiplayer modes
+function isAnnotationEnabled() {
+    // Check if we're in a mode that disables annotations
+    const isAgentMode = typeof window.isAgentMode === 'function' && window.isAgentMode();
+    const isTasksMode = typeof window.isTasksMode === 'function' && window.isTasksMode();
+    const isMultiplayerMode = typeof window.isMultiplayerMode === 'function' && window.isMultiplayerMode();
+
+    // Annotations enabled if NOT in Agent, Tasks, or Multiplayer mode
+    // Chat mode NOW supports annotations (saved per session)
+    return !isAgentMode && !isTasksMode && !isMultiplayerMode;
+}
+
 // Global cleanup function for mode switching
 function cleanupAllModeUI() {
     // Hide tasks view container
@@ -32,7 +45,6 @@ function cleanupAllModeUI() {
     const btnSave = document.getElementById('btn-save');
     const btnClear = document.getElementById('btn-clear');
     const btnLoad = document.getElementById('btn-load');
-    const btnDownload = document.getElementById('btn-download');
     const btnZoomIn = document.getElementById('btn-zoom-in');
     const btnZoomOut = document.getElementById('btn-zoom-out');
     const btnFitView = document.getElementById('btn-fit-view');
@@ -43,7 +55,6 @@ function cleanupAllModeUI() {
     if (btnSave) btnSave.style.display = '';
     if (btnClear) btnClear.style.display = '';
     if (btnLoad) btnLoad.style.display = '';
-    if (btnDownload) btnDownload.style.display = '';
     if (btnZoomIn) btnZoomIn.style.display = '';
     if (btnZoomOut) btnZoomOut.style.display = '';
     if (btnFitView) btnFitView.style.display = '';
@@ -243,10 +254,6 @@ class ComfyUIApp {
             }
         });
 
-        document.getElementById('btn-download').addEventListener('click', () => {
-            this.workflowManager.saveWorkflow();
-        });
-
         document.getElementById('btn-clear').addEventListener('click', () => {
             if (confirm('Clear all nodes?')) {
                 this.canvasRenderer.clearNodes();
@@ -301,6 +308,59 @@ class ComfyUIApp {
         document.getElementById('smartwatch-selector-overlay').addEventListener('click', (e) => {
             if (e.target.id === 'smartwatch-selector-overlay') {
                 this.hideSmartwatchSelector();
+            }
+        });
+
+        // Model selector button
+        document.getElementById('btn-model-selector')?.addEventListener('click', () => {
+            if (window.modelSelector) {
+                window.modelSelector.show();
+            }
+        });
+
+        // Model selector cancel button
+        document.getElementById('cancel-model-select')?.addEventListener('click', () => {
+            if (window.modelSelector) {
+                window.modelSelector.hide();
+            }
+        });
+
+        // Close model selector on overlay click
+        document.getElementById('model-selector-overlay')?.addEventListener('click', (e) => {
+            if (e.target.id === 'model-selector-overlay' && window.modelSelector) {
+                window.modelSelector.hide();
+            }
+        });
+
+        // API Key Modal event listeners
+        document.getElementById('close-api-key-modal')?.addEventListener('click', () => {
+            if (window.modelSelector) {
+                window.modelSelector.hideApiKeyModal();
+            }
+        });
+
+        document.getElementById('cancel-api-key')?.addEventListener('click', () => {
+            if (window.modelSelector) {
+                window.modelSelector.hideApiKeyModal();
+            }
+        });
+
+        document.getElementById('save-api-key')?.addEventListener('click', () => {
+            if (window.modelSelector) {
+                window.modelSelector.saveApiKey();
+            }
+        });
+
+        document.getElementById('api-key-modal-overlay')?.addEventListener('click', (e) => {
+            if (e.target.id === 'api-key-modal-overlay' && window.modelSelector) {
+                window.modelSelector.hideApiKeyModal();
+            }
+        });
+
+        // Enter key in API input
+        document.getElementById('api-key-input')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && window.modelSelector) {
+                window.modelSelector.saveApiKey();
             }
         });
 
@@ -501,8 +561,8 @@ class ComfyUIApp {
         // Check for node click
         const clickedNode2 = this.canvasRenderer.getNodeAtPosition(canvasPos.x, canvasPos.y);
 
-        // In Journals mode, check for annotation clicks before node clicks
-        if (typeof isJournalMode === 'function' && isJournalMode() && this.annotationManager && !clickedNode2) {
+        // In annotation-enabled modes (Journals, Design Flow), check for annotation clicks before node clicks
+        if (isAnnotationEnabled() && this.annotationManager && !clickedNode2) {
             const clickedAnnotation = this.annotationManager.getAnnotationAtPosition(canvasPos.x, canvasPos.y);
 
             if (clickedAnnotation) {
@@ -524,13 +584,34 @@ class ComfyUIApp {
                     }
                 }
 
+                // Use Ctrl/Cmd for multi-select (consistent with nodes)
+                const isMultiSelect = e.ctrlKey || e.metaKey;
+                const isAlreadySelected = clickedAnnotation.selected;
+
+                // Only deselect if clicking on UNSELECTED annotation without Ctrl
+                // (clicking on already-selected annotation should drag the whole selection)
+                if (!isMultiSelect && !isAlreadySelected) {
+                    this.canvasRenderer.deselectAll();
+                    this.annotationManager.deselectAll();
+                }
+
                 // Select and start dragging annotation
-                this.annotationManager.startDragging(clickedAnnotation, canvasPos.x, canvasPos.y);
+                this.annotationManager.startDragging(clickedAnnotation, canvasPos.x, canvasPos.y, isMultiSelect);
+
+                // Store offsets for selected nodes (for unified drag)
+                this.unifiedDragNodeOffsets = new Map();
+                this.canvasRenderer.selectedNodes.forEach(node => {
+                    this.unifiedDragNodeOffsets.set(node, {
+                        x: canvasPos.x - node.x,
+                        y: canvasPos.y - node.y
+                    });
+                });
+
                 this.canvasRenderer.render();
                 return;
             }
 
-            // Shift+drag on empty canvas in Journal mode: start arrow drawing
+            // Shift+drag on empty canvas: start arrow drawing (annotation-enabled modes)
             if (e.shiftKey && e.button === 0) {
                 this.annotationManager.startArrowDrawing(canvasPos.x, canvasPos.y);
                 return;
@@ -538,19 +619,29 @@ class ComfyUIApp {
         }
 
         if (clickedNode2) {
+            const isMultiSelect = e.ctrlKey || e.metaKey;
+
+            // Check if clicked node is already selected (for multi-drag)
+            const selectedNodes = this.canvasRenderer.selectedNodes;
+            const isAlreadySelected = selectedNodes.includes(clickedNode2);
+
+            // Only deselect annotations if clicking on UNSELECTED node without Ctrl
+            // (clicking on already-selected node should drag the whole selection)
+            if (!isMultiSelect && !isAlreadySelected) {
+                if (isAnnotationEnabled() && this.annotationManager) {
+                    this.annotationManager.deselectAll();
+                }
+            }
+
             // Start dragging node
             this.isDraggingNode = true;
             this.draggedNode = clickedNode2;
             this.dragOffsetX = canvasPos.x - clickedNode2.x;
             this.dragOffsetY = canvasPos.y - clickedNode2.y;
 
-            // Check if clicked node is already selected (for multi-drag)
-            const selectedNodes = this.canvasRenderer.selectedNodes;
-            const isAlreadySelected = selectedNodes.includes(clickedNode2);
-
             // Only change selection if NOT clicking an already-selected node
             if (!isAlreadySelected) {
-                if (!e.ctrlKey && !e.metaKey) {
+                if (!isMultiSelect) {
                     this.canvasRenderer.selectNode(clickedNode2, false);
                 } else {
                     this.canvasRenderer.selectNode(clickedNode2, true);
@@ -577,6 +668,11 @@ class ComfyUIApp {
                 });
             }
 
+            // Also store offsets for selected annotations (for unified drag)
+            if (isAnnotationEnabled() && this.annotationManager) {
+                this.annotationManager.initDragOffsets(canvasPos.x, canvasPos.y);
+            }
+
             this.updatePropertiesPanel(clickedNode2);
 
             // Notify chat mode of selection
@@ -589,9 +685,15 @@ class ComfyUIApp {
                 this.potentialMarquee = true;
                 this.marqueeStartX = screenX;
                 this.marqueeStartY = screenY;
-                // Deselect all
+                // Deselect all nodes
                 this.canvasRenderer.deselectAll();
                 this.updatePropertiesPanel(null);
+
+                // Deselect all annotations
+                if (isAnnotationEnabled() && this.annotationManager) {
+                    this.annotationManager.deselectAll();
+                    this.canvasRenderer.render();
+                }
             } else if (e.button === 1) { // Middle button - pan only
                 this.isPanning = true;
                 this.panStartX = e.clientX;
@@ -614,8 +716,8 @@ class ComfyUIApp {
         document.getElementById('canvas-coords').textContent =
             `X: ${Math.round(canvasPos.x)}, Y: ${Math.round(canvasPos.y)}`;
 
-        // Handle annotation operations in Journals mode
-        if (typeof isJournalMode === 'function' && isJournalMode() && this.annotationManager) {
+        // Handle annotation operations in annotation-enabled modes
+        if (isAnnotationEnabled() && this.annotationManager) {
             // Text box resizing
             if (this.annotationManager.isResizingText) {
                 this.annotationManager.updateTextResize(canvasPos.x, canvasPos.y);
@@ -633,6 +735,16 @@ class ComfyUIApp {
             // Annotation dragging
             if (this.annotationManager.isDraggingAnnotation) {
                 this.annotationManager.updateDragging(canvasPos.x, canvasPos.y);
+
+                // Also move selected nodes (unified drag)
+                if (this.unifiedDragNodeOffsets && this.unifiedDragNodeOffsets.size > 0) {
+                    for (const [node, offset] of this.unifiedDragNodeOffsets) {
+                        node.x = canvasPos.x - offset.x;
+                        node.y = canvasPos.y - offset.y;
+                    }
+                    this.workflowManager.markDirty();
+                }
+
                 this.canvasRenderer.render();
                 return;
             }
@@ -651,6 +763,12 @@ class ComfyUIApp {
                 node.x = canvasPos.x - offset.x;
                 node.y = canvasPos.y - offset.y;
             }
+
+            // Also drag selected annotations (unified drag)
+            if (isAnnotationEnabled() && this.annotationManager) {
+                this.annotationManager.updateDragging(canvasPos.x, canvasPos.y, true);
+            }
+
             this.canvasRenderer.render();
             this.workflowManager.markDirty();
         } else if (this.isPanning) {
@@ -715,8 +833,8 @@ class ComfyUIApp {
     }
 
     onCanvasMouseUp(e) {
-        // Handle annotation operations in Journals mode
-        if (typeof isJournalMode === 'function' && isJournalMode() && this.annotationManager) {
+        // Handle annotation operations in annotation-enabled modes
+        if (isAnnotationEnabled() && this.annotationManager) {
             // Stop text box resizing
             if (this.annotationManager.isResizingText) {
                 this.annotationManager.stopTextResize();
@@ -734,6 +852,7 @@ class ComfyUIApp {
             // Stop annotation dragging
             if (this.annotationManager.isDraggingAnnotation) {
                 this.annotationManager.stopDragging();
+                this.unifiedDragNodeOffsets = null; // Clear unified drag state
                 this.canvasRenderer.render();
                 return;
             }
@@ -838,11 +957,30 @@ class ComfyUIApp {
 
         // Handle marquee selection completion
         if (this.isMarqueeSelecting) {
-            const rect = this.canvasRenderer.getMarqueeBounds();
-            const nodesInRect = this.canvasRenderer.getNodesInRect(rect);
+            const screenRect = this.canvasRenderer.getMarqueeBounds();
+
+            // Select nodes (getNodesInRect handles coordinate conversion internally)
+            const nodesInRect = this.canvasRenderer.getNodesInRect(screenRect);
             nodesInRect.forEach(node => {
                 this.canvasRenderer.selectNode(node, true); // multi-select
             });
+
+            // Also select annotations in annotation-enabled modes
+            // Convert screen rect to canvas coords for annotations
+            if (isAnnotationEnabled() && this.annotationManager) {
+                const topLeft = this.canvasRenderer.screenToCanvas(screenRect.x, screenRect.y);
+                const bottomRight = this.canvasRenderer.screenToCanvas(
+                    screenRect.x + screenRect.width,
+                    screenRect.y + screenRect.height
+                );
+                const canvasRect = {
+                    x: Math.min(topLeft.x, bottomRight.x),
+                    y: Math.min(topLeft.y, bottomRight.y),
+                    width: Math.abs(bottomRight.x - topLeft.x),
+                    height: Math.abs(bottomRight.y - topLeft.y)
+                };
+                this.annotationManager.selectAnnotationsInRect(canvasRect);
+            }
 
             this.isMarqueeSelecting = false;
             this.canvasRenderer.clearMarquee();
@@ -888,8 +1026,8 @@ class ComfyUIApp {
         const canvasPos = this.canvasRenderer.screenToCanvas(screenX, screenY);
         this.lastContextMenuCanvasPos = canvasPos;
 
-        // Check if right-clicked on annotation in Journals mode
-        if (typeof isJournalMode === 'function' && isJournalMode() && this.annotationManager) {
+        // Check if right-clicked on annotation
+        if (isAnnotationEnabled() && this.annotationManager) {
             const clickedAnnotation = this.annotationManager.getAnnotationAtPosition(canvasPos.x, canvasPos.y);
             if (clickedAnnotation) {
                 this.annotationManager.selectAnnotation(clickedAnnotation);
@@ -917,8 +1055,8 @@ class ComfyUIApp {
             return;
         }
 
-        // Check if double-clicked on an annotation in Journals mode
-        if (typeof isJournalMode === 'function' && isJournalMode() && this.annotationManager) {
+        // Check if double-clicked on an annotation
+        if (isAnnotationEnabled() && this.annotationManager) {
             const clickedAnnotation = this.annotationManager.getAnnotationAtPosition(canvasPos.x, canvasPos.y);
             if (clickedAnnotation) {
                 if (clickedAnnotation.type === 'text') {
@@ -1029,11 +1167,34 @@ class ComfyUIApp {
                     break;
                 case 'c':
                     e.preventDefault();
-                    this.copySelected();
+                    // Check for selected annotations first (in annotation-enabled modes)
+                    if (isAnnotationEnabled() &&
+                        this.annotationManager && this.annotationManager.selectedAnnotations.length > 0) {
+                        this.annotationManager.copySelectedAnnotations();
+                        this.workflowManager.showNotification(`Copied ${this.annotationManager.selectedAnnotations.length} annotation(s)`, 'info');
+                    } else {
+                        this.copySelected(); // nodes
+                    }
                     break;
                 case 'v':
                     e.preventDefault();
-                    this.paste();
+                    // Check for annotation clipboard first (in annotation-enabled modes)
+                    if (isAnnotationEnabled() &&
+                        this.annotationManager && this.annotationManager.hasClipboard()) {
+                        // Get paste position (mouse or center)
+                        let targetPos = this.lastContextMenuCanvasPos || this.lastPointerCanvasPos;
+                        if (!targetPos) {
+                            const centerX = -this.canvasRenderer.offsetX / this.canvasRenderer.scale + this.canvas.width / 2 / this.canvasRenderer.scale;
+                            const centerY = -this.canvasRenderer.offsetY / this.canvasRenderer.scale + this.canvas.height / 2 / this.canvasRenderer.scale;
+                            targetPos = { x: centerX, y: centerY };
+                        }
+                        this.annotationManager.pasteAnnotations(targetPos.x, targetPos.y);
+                        this.lastContextMenuCanvasPos = null;
+                        this.canvasRenderer.render();
+                        this.workflowManager.showNotification('Pasted annotation(s)', 'info');
+                    } else {
+                        this.paste(); // nodes
+                    }
                     break;
                 case 'd':
                     e.preventDefault();
@@ -1392,6 +1553,30 @@ class ComfyUIApp {
                 <div class="property-label">Node Type</div>
                 <div class="property-value">${node.type}</div>
             </div>
+        `;
+
+        // Add Visualization dropdown below Node Type (only for nodes with visualization property and image set)
+        if (node.properties.hasOwnProperty('visualization') && node.properties.image) {
+            const vizValue = node.properties.visualization || 'Sphere';
+            const isSphere = vizValue === 'Sphere';
+            html += `
+            <div class="property-group visualization-group">
+                <div class="property-label">Visualization</div>
+                <select class="property-select visualization-select" data-property="visualization">
+                    <option value="Sphere" ${vizValue === 'Sphere' ? 'selected' : ''}>Sphere</option>
+                    <option value="Rectangular" ${vizValue === 'Rectangular' ? 'selected' : ''}>Rectangular</option>
+                </select>
+                <div class="image-preview-container" style="margin-top: 12px; display: flex; justify-content: center;">
+                    <img src="${node.properties.image}" alt="Preview" class="visualization-preview"
+                         style="width: 80px; height: 80px; object-fit: cover;
+                                ${isSphere ? 'border-radius: 50%;' : 'border-radius: 8px;'}
+                                border: 2px solid #5a9fd4;">
+                </div>
+            </div>
+            `;
+        }
+
+        html += `
             <div class="property-group">
                 <div class="property-label">Node ID</div>
                 <div class="property-value" style="font-size: 10px; font-family: monospace;">${node.id}</div>
@@ -1408,6 +1593,16 @@ class ComfyUIApp {
                 // In Journal mode, skip dataSource property entirely
                 if (key === 'dataSource' && typeof isJournalMode === 'function' && isJournalMode()) {
                     return; // Skip this property
+                }
+
+                // Skip fallbackAction - it will be rendered conditionally after dataSource
+                if (key === 'fallbackAction') {
+                    return; // Skip - rendered separately
+                }
+
+                // Skip visualization - it will be rendered above Node Type when image is set
+                if (key === 'visualization') {
+                    return; // Skip - rendered separately
                 }
 
                 // Format camelCase to Title Case (e.g., "dataSource" -> "Data source")
@@ -1431,7 +1626,32 @@ class ComfyUIApp {
                         html += `<option value="${opt}" ${opt === value ? 'selected' : ''}>${opt}</option>`;
                     });
                     html += `</select>`;
+
+                    // Add conditional fallbackAction UI after dataSource select
+                    if (key === 'dataSource' && node.properties.hasOwnProperty('fallbackAction')) {
+                        const fallbackValue = node.properties.fallbackAction || 'Generate Question to answer';
+                        const isVisible = value === "Auto Picked randomly from user's data";
+                        html += `
+                            <div class="fallback-action-container" style="display: ${isVisible ? 'block' : 'none'}; margin-top: 12px;">
+                                <label style="display: block; font-size: 11px; color: #b0b0b0; margin-bottom: 4px;">If user does not have this node</label>
+                                <select class="property-select fallback-action-select" data-property="fallbackAction">
+                                    <option value="Generate Question to answer" ${fallbackValue === 'Generate Question to answer' ? 'selected' : ''}>Generate Question to answer</option>
+                                    <option value="Generate instructions to imagine and answer" ${fallbackValue === 'Generate instructions to imagine and answer' ? 'selected' : ''}>Generate instructions to imagine and answer</option>
+                                </select>
+                            </div>
+                        `;
+                    }
                 } else if (propDef?.type === 'text') {
+                    // Check if this node has dataSource and if it should hide text field
+                    const hasDataSource = node.properties.hasOwnProperty('dataSource');
+                    const hideOptions = ['Generated by AI', 'Answered by the user', 'Picked manually by the user from user\'s data', 'Auto Picked randomly from user\'s data'];
+                    const hideTextField = hasDataSource && hideOptions.includes(node.properties.dataSource) && key === 'text';
+
+                    // Wrap text field in container for visibility toggle (only for nodes with dataSource)
+                    if (hasDataSource && key === 'text') {
+                        html += `<div class="text-field-container" style="display: ${hideTextField ? 'none' : 'block'};">`;
+                    }
+
                     // Use larger textarea for Agent nodes' prompt field
                     const rows = (key === 'text' && node.type === 'Agent') ? '16' : '12';
                     html += `<textarea class="property-input" data-property="${key}" rows="${rows}">${value}</textarea>`;
@@ -1461,11 +1681,31 @@ class ComfyUIApp {
                             </div>
                         `;
                     }
+
+                    // Close the text-field-container
+                    if (hasDataSource && key === 'text') {
+                        html += `</div>`;
+                    }
                 } else if (key === 'image' && node.type === 'Agent') {
                     // For Agent nodes, don't show the image text input (just show buttons)
                     // This prevents users from typing text that gets treated as a URL
                 } else {
+                    // Check if this is an image field for a node with dataSource
+                    const hasDataSource = node.properties.hasOwnProperty('dataSource');
+                    const hideOptions = ['Generated by AI', 'Answered by the user', 'Picked manually by the user from user\'s data', 'Auto Picked randomly from user\'s data'];
+                    const hideImageField = hasDataSource && hideOptions.includes(node.properties.dataSource) && key === 'image';
+
+                    // Wrap image field in container for visibility toggle (only for nodes with dataSource)
+                    if (hasDataSource && key === 'image') {
+                        html += `<div class="image-field-container" style="display: ${hideImageField ? 'none' : 'block'};">`;
+                    }
+
                     html += `<input type="text" class="property-input" data-property="${key}" value="${value}">`;
+
+                    // Close the image-field-container
+                    if (hasDataSource && key === 'image') {
+                        html += `</div>`;
+                    }
                 }
 
                 // Add buttons below IMAGE field for Agent nodes
@@ -1494,6 +1734,43 @@ class ComfyUIApp {
                     `;
                 }
 
+                // Add Upload Picture button below IMAGE field for all nodes in Journal mode
+                if (key === 'image' && node.type !== 'Agent' && typeof isJournalMode === 'function' && isJournalMode()) {
+                    html += `
+                        <div style="margin-top: 8px;">
+                            <button class="btn btn-secondary" id="upload-image-btn-${node.id}"
+                                    style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <polyline points="17 8 12 3 7 8"/>
+                                    <line x1="12" y1="3" x2="12" y2="15"/>
+                                </svg>
+                                Upload Picture
+                            </button>
+                        </div>
+                    `;
+                }
+
+                // Add "Add image" button for nodes with dataSource (when Raw or Not defined)
+                const inJournalModeCheck = typeof isJournalMode === 'function' && isJournalMode();
+                const showAddImageOptions = ['Raw', 'Not defined'];
+                if (key === 'image' && node.type !== 'Agent' && !inJournalModeCheck &&
+                    node.properties.hasOwnProperty('dataSource') && showAddImageOptions.includes(node.properties.dataSource)) {
+                    html += `
+                        <div class="add-image-container" style="margin-top: 8px;">
+                            <button class="btn btn-secondary" id="add-image-btn-${node.id}"
+                                    style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                    <circle cx="8.5" cy="8.5" r="1.5"/>
+                                    <polyline points="21 15 16 10 5 21"/>
+                                </svg>
+                                Add image
+                            </button>
+                        </div>
+                    `;
+                }
+
                 html += `</div>`;
             });
 
@@ -1511,6 +1788,49 @@ class ComfyUIApp {
                 this.workflowManager.markDirty();
             });
         });
+
+        // Add event listener for dataSource to toggle fallbackAction and text/image visibility
+        const dataSourceSelect = container.querySelector('.property-select[data-property="dataSource"]');
+        if (dataSourceSelect) {
+            dataSourceSelect.addEventListener('change', (e) => {
+                // Toggle fallbackAction visibility
+                const fallbackContainer = container.querySelector('.fallback-action-container');
+                if (fallbackContainer) {
+                    fallbackContainer.style.display =
+                        e.target.value === "Auto Picked randomly from user's data" ? 'block' : 'none';
+                }
+
+                // Toggle text/image field visibility based on dataSource selection
+                const textContainer = container.querySelector('.text-field-container');
+                const imageContainer = container.querySelector('.image-field-container');
+                const hideOptions = ['Generated by AI', 'Answered by the user', 'Picked manually by the user from user\'s data', 'Auto Picked randomly from user\'s data'];
+                const hideFields = hideOptions.includes(e.target.value);
+
+                if (textContainer) textContainer.style.display = hideFields ? 'none' : 'block';
+                if (imageContainer) imageContainer.style.display = hideFields ? 'none' : 'block';
+            });
+        }
+
+        // Add event listener for fallbackAction select
+        const fallbackSelect = container.querySelector('.fallback-action-select');
+        if (fallbackSelect) {
+            fallbackSelect.addEventListener('change', (e) => {
+                node.properties.fallbackAction = e.target.value;
+                this.workflowManager.markDirty();
+            });
+        }
+
+        // Auto-change dataSource from "Not defined" to "Raw" when user starts typing in text field
+        const textInput = container.querySelector('.property-input[data-property="text"]');
+        if (textInput && dataSourceSelect) {
+            textInput.addEventListener('input', (e) => {
+                if (node.properties.dataSource === 'Not defined' && e.target.value.trim().length > 0) {
+                    node.properties.dataSource = 'Raw';
+                    dataSourceSelect.value = 'Raw';
+                    this.workflowManager.markDirty();
+                }
+            });
+        }
 
         // Add event listener for AI workflow generation (Terminal node)
         const generateBtn = document.getElementById('generate-workflow-btn');
@@ -1555,6 +1875,63 @@ class ComfyUIApp {
                 this.handleImageUpload(node);
             });
         }
+
+        // Add event listener for Journal mode Upload Picture button
+        const uploadImageBtn = document.getElementById(`upload-image-btn-${node.id}`);
+        if (uploadImageBtn) {
+            uploadImageBtn.addEventListener('click', () => {
+                this.handleImageUpload(node);
+            });
+        }
+
+        // Add event listener for "Add image" button (Design Flow mode)
+        const addImageBtn = document.getElementById(`add-image-btn-${node.id}`);
+        if (addImageBtn) {
+            addImageBtn.addEventListener('click', () => {
+                this.handleAddImage(node);
+            });
+        }
+
+        // Add event listener for Visualization select
+        const vizSelect = container.querySelector('.visualization-select');
+        if (vizSelect) {
+            vizSelect.addEventListener('change', (e) => {
+                node.properties.visualization = e.target.value;
+                this.canvasRenderer.render();
+                this.workflowManager.markDirty();
+                // Update image preview shape
+                const preview = container.querySelector('.visualization-preview');
+                if (preview) {
+                    preview.style.borderRadius = e.target.value === 'Sphere' ? '50%' : '8px';
+                }
+            });
+        }
+    }
+
+    // Handle "Add image" for nodes with visualization
+    handleAddImage(node) {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    node.properties.image = event.target.result;
+                    // Set dataSource to Raw if it was Not defined
+                    if (node.properties.dataSource === 'Not defined') {
+                        node.properties.dataSource = 'Raw';
+                    }
+                    this.canvasRenderer.render();
+                    this.workflowManager.markDirty();
+                    // Refresh properties panel to show Visualization dropdown
+                    this.updatePropertiesPanel(node);
+                };
+                reader.readAsDataURL(file);
+            }
+        };
+        input.click();
     }
 
     showContextMenu(x, y) {
@@ -2669,7 +3046,7 @@ Available node types:
 - Perception Graph: Dreams, Goals, Rules, Memories, Questions, Expressions, Instructions, Problem, Danger
 - Hero Journey: Hero, Mentor, Villain
 - Social: Friends, Family, Coworkers, Lovers
-- Utility: Picture, Text, Video, Terminal
+- Utility: Picture, Text, Video, Terminal, Agent
 
 Your task:
 1. Analyze the user's prompt
@@ -2690,6 +3067,7 @@ Your task:
 }
 
 Rules:
+- CRITICAL: The FIRST node (index 0) MUST ALWAYS be an Agent node - this is required for Terminal connectivity
 - Node indices in connections start at 0
 - Create a LEFT-TO-RIGHT flow (connections should go from lower index to higher index when possible)
 - Each node should have 1-3 connections
@@ -3038,7 +3416,11 @@ Return ONLY the prompt text, no other formatting or explanation.`;
                 promptText = `Portrait of ${heroType}: ${promptText}. Professional digital art style, detailed face, dramatic lighting`;
             }
 
-            const OPENAI_API_KEY = localStorage.getItem('openai-api-key') || '';
+            // Get OpenAI API key from localStorage (set via Model Selector)
+            const OPENAI_API_KEY = localStorage.getItem('idea-engine-api-openai') || '';
+            if (!OPENAI_API_KEY) {
+                throw new Error('OpenAI API key not set. Please configure it in Model Selector.');
+            }
 
             const response = await fetch('https://api.openai.com/v1/images/generations', {
                 method: 'POST',
@@ -3353,10 +3735,14 @@ Return ONLY the prompt text, no other formatting or explanation.`;
                 smartwatchStatus.textContent = watch ? watch.name : 'Connected';
                 smartwatchStatus.classList.remove('disconnected');
                 smartwatchStatus.classList.add('connected');
+                // Add connected class to button for checkmark
+                smartwatchBtn?.classList.add('connected');
             } else {
                 smartwatchStatus.textContent = 'Disconnected';
                 smartwatchStatus.classList.remove('connected');
                 smartwatchStatus.classList.add('disconnected');
+                // Remove connected class from button
+                smartwatchBtn?.classList.remove('connected');
             }
         }
     }
@@ -3554,10 +3940,293 @@ Return ONLY the prompt text, no other formatting or explanation.`;
     }
 }
 
+// Model Selector Class
+class ModelSelector {
+    constructor() {
+        this.pendingModel = null;
+        this.pendingProvider = null;
+    }
+
+    show() {
+        const overlay = document.getElementById('model-selector-overlay');
+        const list = document.getElementById('model-selector-list');
+
+        if (!overlay || !list) return;
+
+        // Build the grouped model list
+        list.innerHTML = this.buildModelList();
+
+        // Attach event listeners
+        this.attachModelListeners();
+
+        overlay.classList.remove('hidden');
+    }
+
+    hide() {
+        document.getElementById('model-selector-overlay')?.classList.add('hidden');
+    }
+
+    buildModelList() {
+        const providers = window.AI_PROVIDERS || {};
+        const models = window.AI_MODELS || {};
+        let html = '';
+
+        Object.keys(providers).forEach(providerId => {
+            const provider = providers[providerId];
+            const providerModels = models[providerId] || [];
+            const hasKey = window.chatAPI?.hasProviderKey(providerId);
+
+            html += `
+                <div class="model-provider-group collapsed" data-provider="${providerId}">
+                    <div class="model-provider-header" data-provider="${providerId}">
+                        <div class="model-provider-info">
+                            <span class="model-provider-icon">${provider.icon}</span>
+                            <span class="model-provider-name">${provider.name}</span>
+                        </div>
+                        <div class="model-provider-status">
+                            <span class="api-key-indicator ${hasKey ? 'configured' : ''}"
+                                  title="${hasKey ? 'API Key Configured' : 'No API Key'}"></span>
+                            <svg class="model-provider-chevron" width="12" height="12" viewBox="0 0 24 24"
+                                 fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="6 9 12 15 18 9"/>
+                            </svg>
+                        </div>
+                    </div>
+                    <div class="model-items-container">
+                        ${providerModels.map(model => {
+                            const isSelected = window.chatAPI?.selectedProvider === providerId &&
+                                             window.chatAPI?.selectedModel === model.id;
+                            return `
+                                <div class="model-selector-item ${isSelected ? 'selected' : ''}"
+                                     data-provider="${providerId}"
+                                     data-model="${model.id}">
+                                    <div class="model-selector-item-info">
+                                        <div class="model-selector-item-name">${model.name}</div>
+                                        <div class="model-selector-item-tier">${model.tier}</div>
+                                    </div>
+                                    <div class="model-selector-item-status">
+                                        <svg class="model-checkmark" width="16" height="16" viewBox="0 0 24 24"
+                                             fill="none" stroke="currentColor" stroke-width="3">
+                                            <polyline points="20 6 9 17 4 12"/>
+                                        </svg>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            `;
+        });
+
+        return html;
+    }
+
+    attachModelListeners() {
+        // Provider header click to collapse/expand
+        document.querySelectorAll('.model-provider-header').forEach(header => {
+            header.addEventListener('click', (e) => {
+                // Don't collapse if clicking the dot
+                if (e.target.classList.contains('api-key-indicator')) {
+                    return;
+                }
+                const group = header.closest('.model-provider-group');
+                group.classList.toggle('collapsed');
+            });
+        });
+
+        // API key indicator (dot) click to open API key modal
+        document.querySelectorAll('.api-key-indicator').forEach(indicator => {
+            indicator.addEventListener('click', (e) => {
+                e.stopPropagation(); // Don't trigger header collapse
+                const providerId = indicator.closest('.model-provider-group').dataset.provider;
+                this.showApiKeyModal(providerId, null);
+            });
+        });
+
+        // Model item click
+        document.querySelectorAll('.model-selector-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const providerId = item.dataset.provider;
+                const modelId = item.dataset.model;
+                this.selectModel(providerId, modelId);
+            });
+        });
+    }
+
+    selectModel(providerId, modelId) {
+        // Check if provider has API key
+        if (!window.chatAPI?.hasProviderKey(providerId)) {
+            // No API key - show modal to enter one
+            this.pendingProvider = providerId;
+            this.pendingModel = modelId;
+            this.showApiKeyModal(providerId, modelId);
+            return;
+        }
+
+        // API key exists - just select the model
+        window.chatAPI?.selectModel(providerId, modelId);
+
+        // Update UI
+        this.updateSelectedState(providerId, modelId);
+
+        // Close popup
+        this.hide();
+    }
+
+    updateSelectedState(providerId, modelId) {
+        // Remove selected class from all
+        document.querySelectorAll('.model-selector-item').forEach(item => {
+            item.classList.remove('selected');
+        });
+
+        // Add selected class to new selection
+        const selectedItem = document.querySelector(
+            `.model-selector-item[data-provider="${providerId}"][data-model="${modelId}"]`
+        );
+        if (selectedItem) {
+            selectedItem.classList.add('selected');
+        }
+    }
+
+    showApiKeyModal(providerId, modelId) {
+        const providers = window.AI_PROVIDERS || {};
+        const models = window.AI_MODELS || {};
+        const provider = providers[providerId];
+        const providerModels = models[providerId] || [];
+        const model = modelId ? providerModels.find(m => m.id === modelId) : null;
+
+        // Check if key already exists
+        const existingKey = window.chatAPI?.getProviderKey(providerId);
+        const hasKey = !!existingKey;
+
+        // Store pending provider for save
+        this.pendingProvider = providerId;
+        this.pendingModel = modelId;
+
+        // Update modal content
+        const titleEl = document.getElementById('api-key-modal-title');
+        const descEl = document.getElementById('api-key-modal-description');
+        const hintEl = document.getElementById('api-key-modal-hint');
+
+        if (titleEl) {
+            titleEl.textContent = hasKey
+                ? `${provider?.name || 'API'} Key`
+                : `Enter ${provider?.name || 'API'} Key`;
+        }
+        if (descEl) {
+            if (hasKey) {
+                descEl.textContent = `Your ${provider?.name || 'API'} key is configured. You can update it below.`;
+            } else if (model) {
+                descEl.textContent = `To use ${model.name}, please enter your ${provider?.name || 'API'} key.`;
+            } else {
+                descEl.textContent = `Enter your ${provider?.name || 'API'} key.`;
+            }
+        }
+        if (hintEl && provider) {
+            hintEl.innerHTML = provider.keyUrl
+                ? `<a href="${provider.keyUrl}" target="_blank">${provider.keyHint}</a>`
+                : provider.keyHint || '';
+        }
+
+        // Show masked key if exists, otherwise clear input
+        const inputEl = document.getElementById('api-key-input');
+        if (inputEl) {
+            if (hasKey) {
+                // Show masked key with last 8 characters visible
+                inputEl.value = '••••••••••••••••' + existingKey.slice(-8);
+                inputEl.dataset.hasExistingKey = 'true';
+                inputEl.dataset.originalMasked = inputEl.value;
+            } else {
+                inputEl.value = '';
+                inputEl.dataset.hasExistingKey = 'false';
+                inputEl.dataset.originalMasked = '';
+            }
+        }
+
+        // Show modal
+        document.getElementById('api-key-modal-overlay')?.classList.remove('hidden');
+
+        // Focus input and select all for easy replacement
+        setTimeout(() => {
+            inputEl?.focus();
+            inputEl?.select();
+        }, 100);
+    }
+
+    hideApiKeyModal() {
+        document.getElementById('api-key-modal-overlay')?.classList.add('hidden');
+        this.pendingProvider = null;
+        this.pendingModel = null;
+    }
+
+    saveApiKey() {
+        const inputEl = document.getElementById('api-key-input');
+        const apiKey = inputEl?.value.trim();
+
+        if (!apiKey) {
+            // Shake the input or show error
+            inputEl?.focus();
+            return;
+        }
+
+        // Check if user didn't change the masked key
+        const originalMasked = inputEl?.dataset.originalMasked || '';
+        if (apiKey === originalMasked) {
+            // User didn't change the key, just close
+            this.hideApiKeyModal();
+            return;
+        }
+
+        // Check if the key looks like it's still masked (starts with dots)
+        if (apiKey.startsWith('••••')) {
+            // User didn't replace the masked key properly
+            inputEl?.focus();
+            inputEl?.select();
+            return;
+        }
+
+        if (this.pendingProvider && window.chatAPI) {
+            // Save the key
+            window.chatAPI.setProviderKey(this.pendingProvider, apiKey);
+
+            // Update the model list to show green indicator
+            const indicator = document.querySelector(
+                `.model-provider-group[data-provider="${this.pendingProvider}"] .api-key-indicator`
+            );
+            if (indicator) {
+                indicator.classList.add('configured');
+            }
+
+            // Only select model if there's a pending model
+            if (this.pendingModel) {
+                window.chatAPI.selectModel(this.pendingProvider, this.pendingModel);
+                this.updateSelectedState(this.pendingProvider, this.pendingModel);
+            }
+
+            // Hide modals
+            this.hideApiKeyModal();
+            // Only close the main popup if we were selecting a model
+            if (this.pendingModel) {
+                this.hide();
+            }
+        }
+    }
+}
+
 // Initialize application when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     window.app = new ComfyUIApp();
+
+    // Initialize Model Selector
+    window.modelSelector = new ModelSelector();
+
     console.log('ComfyUI Clone initialized');
+
+    // Restore last active mode on page load
+    const lastMode = localStorage.getItem('idea-engine-current-mode');
+    if (lastMode === 'chat' && typeof enterChatMode === 'function') {
+        setTimeout(() => enterChatMode(), 100);
+    }
 
     // Note: Lottie animation now only loads in Chat mode (gamification feature)
     // No animation in Design Flow, Journals, or Agent modes

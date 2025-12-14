@@ -16,6 +16,9 @@ function initJournals() {
     // Set up event listeners
     setupJournalEventListeners();
 
+    // Set up context menu for journal dates
+    setupJournalDateContextMenu();
+
     // Populate the sidebar sections
     populateJournalSidebar();
 }
@@ -23,10 +26,10 @@ function initJournals() {
 // Date utilities
 function getTodayDateString() {
     const now = new Date();
-    return formatDate(now);
+    return formatJournalDate(now);
 }
 
-function formatDate(date) {
+function formatJournalDate(date) {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
@@ -186,6 +189,11 @@ function getAllJournalDates() {
         dates.push(today);
     }
 
+    // Always include the current date user is viewing (so newly created dates don't disappear)
+    if (currentJournalDate && !dates.includes(currentJournalDate)) {
+        dates.push(currentJournalDate);
+    }
+
     // Sort newest first
     dates.sort((a, b) => b.localeCompare(a));
 
@@ -205,6 +213,9 @@ function enterJournalMode() {
     }
     if (typeof isTasksMode === 'function' && isTasksMode() && typeof resetTasksModeState === 'function') {
         resetTasksModeState();
+    }
+    if (typeof isMultiplayerMode === 'function' && isMultiplayerMode() && typeof resetMultiplayerModeState === 'function') {
+        resetMultiplayerModeState();
     }
 
     // Hide tasks view container and section
@@ -238,7 +249,8 @@ function enterJournalMode() {
             connections: app.connectionManager.connections.map(conn => ({
                 output: { nodeId: conn.outputNode.id, index: conn.outputIndex },
                 input: { nodeId: conn.inputNode.id, index: conn.inputIndex }
-            }))
+            })),
+            annotations: app.annotationManager ? app.annotationManager.toJSON() : []
         };
     }
 
@@ -289,6 +301,10 @@ function enterJournalMode() {
             }
         });
     }
+
+    // Hide workflow buttons and add Journal-specific buttons
+    hideWorkflowToolbarButtons();
+    createJournalToolbarButtons();
 
     // Load journal data for current date
     currentJournalDate = getTodayDateString();
@@ -351,6 +367,10 @@ function exitJournalMode() {
         });
     }
 
+    // Restore workflow buttons and remove Journal-specific buttons
+    showWorkflowToolbarButtons();
+    removeJournalToolbarButtons();
+
     // Restore original watermark
     const watermark = document.getElementById('canvas-watermark');
     if (watermark) {
@@ -361,6 +381,11 @@ function exitJournalMode() {
     if (previousDesignFlowState && typeof app !== 'undefined' && app.canvasRenderer && app.connectionManager) {
         app.canvasRenderer.nodes = [];
         app.connectionManager.connections = [];
+
+        // Clear journal annotations before restoring Design Flow state
+        if (app.annotationManager) {
+            app.annotationManager.clearAnnotations();
+        }
 
         if (previousDesignFlowState.nodes) {
             previousDesignFlowState.nodes.forEach(nodeData => {
@@ -383,6 +408,11 @@ function exitJournalMode() {
                     });
                 }
             });
+        }
+
+        // Restore Design Flow annotations
+        if (app.annotationManager && previousDesignFlowState.annotations && previousDesignFlowState.annotations.length > 0) {
+            app.annotationManager.fromJSON(previousDesignFlowState.annotations);
         }
 
         app.canvasRenderer.render();
@@ -630,7 +660,7 @@ function renderDatesList() {
         dateText.className = 'date-text';
 
         const today = getTodayDateString();
-        const yesterday = formatDate(new Date(Date.now() - 86400000));
+        const yesterday = formatJournalDate(new Date(Date.now() - 86400000));
 
         if (dateString === today) {
             dateText.textContent = 'Today';
@@ -653,6 +683,12 @@ function renderDatesList() {
         // Click to navigate to date
         dateItem.addEventListener('click', () => {
             navigateToDate(dateString);
+        });
+
+        // Right-click to show context menu
+        dateItem.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            showJournalDateContextMenu(e, dateString);
         });
 
         container.appendChild(dateItem);
@@ -722,6 +758,282 @@ function confirmAddDate() {
 // Export popup functions globally
 window.showAddDatePopup = showAddDatePopup;
 window.hideAddDatePopup = hideAddDatePopup;
+
+// ============================================
+// Journal Toolbar Button Management
+// ============================================
+
+/**
+ * Create and add Journal-specific toolbar buttons (Text, Arrow)
+ */
+function createJournalToolbarButtons() {
+    const toolbar = document.querySelector('.toolbar-actions');
+    if (!toolbar) return;
+
+    // Check if buttons already exist
+    if (document.getElementById('btn-add-text')) return;
+
+    // Create Add Text button
+    const addTextBtn = document.createElement('button');
+    addTextBtn.id = 'btn-add-text';
+    addTextBtn.className = 'toolbar-btn journal-mode-btn';
+    addTextBtn.title = 'Add Text Annotation';
+    addTextBtn.innerHTML = `
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 7V4h16v3"/>
+            <path d="M9 20h6"/>
+            <path d="M12 4v16"/>
+        </svg>
+        Text
+    `;
+    addTextBtn.addEventListener('click', () => {
+        if (typeof app !== 'undefined' && app.annotationManager) {
+            // Create text at canvas center
+            const centerX = -app.canvasRenderer.offsetX / app.canvasRenderer.scale + app.canvas.width / 2 / app.canvasRenderer.scale;
+            const centerY = -app.canvasRenderer.offsetY / app.canvasRenderer.scale + app.canvas.height / 2 / app.canvasRenderer.scale;
+            app.annotationManager.createTextAnnotation(centerX, centerY);
+            app.canvasRenderer.render();
+        }
+    });
+
+    // Create Add Arrow button
+    const addArrowBtn = document.createElement('button');
+    addArrowBtn.id = 'btn-add-arrow';
+    addArrowBtn.className = 'toolbar-btn journal-mode-btn';
+    addArrowBtn.title = 'Add Arrow Annotation (or Shift+Drag on canvas)';
+    addArrowBtn.innerHTML = `
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="5" y1="12" x2="19" y2="12"/>
+            <polyline points="12 5 19 12 12 19"/>
+        </svg>
+        Arrow
+    `;
+    addArrowBtn.addEventListener('click', () => {
+        if (typeof app !== 'undefined' && app.annotationManager) {
+            // Create arrow at canvas center
+            const centerX = -app.canvasRenderer.offsetX / app.canvasRenderer.scale + app.canvas.width / 2 / app.canvasRenderer.scale;
+            const centerY = -app.canvasRenderer.offsetY / app.canvasRenderer.scale + app.canvas.height / 2 / app.canvasRenderer.scale;
+            // Create horizontal arrow 100px wide
+            const arrow = {
+                id: `ann_arrow_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                type: 'arrow',
+                startX: centerX - 50,
+                startY: centerY,
+                endX: centerX + 50,
+                endY: centerY,
+                strokeColor: '#ffffff',
+                strokeWidth: 2,
+                arrowheadStart: false,
+                arrowheadEnd: true,
+                roughness: 1.5,
+                selected: true
+            };
+            app.annotationManager.annotations.push(arrow);
+            app.annotationManager.selectAnnotation(arrow);
+            app.canvasRenderer.render();
+            saveCurrentJournalCanvas();
+        }
+    });
+
+    // Find the btn-new button and insert after it
+    const btnNew = document.getElementById('btn-new');
+    if (btnNew && btnNew.nextSibling) {
+        toolbar.insertBefore(addArrowBtn, btnNew.nextSibling);
+        toolbar.insertBefore(addTextBtn, btnNew.nextSibling);
+    } else {
+        toolbar.appendChild(addTextBtn);
+        toolbar.appendChild(addArrowBtn);
+    }
+}
+
+/**
+ * Remove Journal-specific toolbar buttons
+ */
+function removeJournalToolbarButtons() {
+    const addTextBtn = document.getElementById('btn-add-text');
+    const addArrowBtn = document.getElementById('btn-add-arrow');
+    if (addTextBtn) addTextBtn.remove();
+    if (addArrowBtn) addArrowBtn.remove();
+}
+
+/**
+ * Hide workflow-related toolbar buttons for Journals mode
+ */
+function hideWorkflowToolbarButtons() {
+    const btnSave = document.getElementById('btn-save');
+    const btnClear = document.getElementById('btn-clear');
+    const btnLoad = document.getElementById('btn-load');
+
+    if (btnSave) btnSave.style.display = 'none';
+    if (btnClear) btnClear.style.display = 'none';
+    if (btnLoad) btnLoad.style.display = 'none';
+}
+
+/**
+ * Show workflow-related toolbar buttons (restore after Journals mode)
+ */
+function showWorkflowToolbarButtons() {
+    const btnSave = document.getElementById('btn-save');
+    const btnClear = document.getElementById('btn-clear');
+    const btnLoad = document.getElementById('btn-load');
+
+    if (btnSave) btnSave.style.display = 'flex';
+    if (btnClear) btnClear.style.display = 'flex';
+    if (btnLoad) btnLoad.style.display = 'flex';
+}
+
+// ============================================
+// Journal Date Context Menu
+// ============================================
+
+let contextMenuDateString = null;
+
+function showJournalDateContextMenu(e, dateString) {
+    const menu = document.getElementById('journal-date-context-menu');
+    if (!menu) return;
+
+    contextMenuDateString = dateString;
+
+    // Position the menu at cursor
+    menu.style.left = e.clientX + 'px';
+    menu.style.top = e.clientY + 'px';
+    menu.classList.remove('hidden');
+
+    // Prevent menu from going off-screen
+    const menuRect = menu.getBoundingClientRect();
+    if (menuRect.right > window.innerWidth) {
+        menu.style.left = (window.innerWidth - menuRect.width - 10) + 'px';
+    }
+    if (menuRect.bottom > window.innerHeight) {
+        menu.style.top = (window.innerHeight - menuRect.height - 10) + 'px';
+    }
+}
+
+function hideJournalDateContextMenu() {
+    const menu = document.getElementById('journal-date-context-menu');
+    if (menu) menu.classList.add('hidden');
+    contextMenuDateString = null;
+}
+
+function changeJournalDate(oldDateString) {
+    // Show a date picker popup
+    const newDate = prompt('Enter new date (YYYY-MM-DD):', oldDateString);
+
+    if (!newDate || newDate === oldDateString) return;
+
+    // Validate date format
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
+        alert('Invalid date format. Please use YYYY-MM-DD.');
+        return;
+    }
+
+    // Check if new date is valid
+    const dateObj = new Date(newDate + 'T00:00:00');
+    if (isNaN(dateObj.getTime())) {
+        alert('Invalid date.');
+        return;
+    }
+
+    // Check if new date already has data
+    if (journalCanvasData[newDate] &&
+        (journalCanvasData[newDate].nodes?.length > 0 ||
+         journalCanvasData[newDate].annotations?.length > 0)) {
+        const confirm = window.confirm(`The date ${newDate} already has content. Merge with existing data?`);
+        if (!confirm) return;
+
+        // Merge: add old nodes/connections/annotations to new date
+        const oldData = journalCanvasData[oldDateString];
+        const newData = journalCanvasData[newDate];
+
+        if (oldData.nodes) {
+            newData.nodes = [...(newData.nodes || []), ...oldData.nodes];
+        }
+        if (oldData.connections) {
+            newData.connections = [...(newData.connections || []), ...oldData.connections];
+        }
+        if (oldData.annotations) {
+            newData.annotations = [...(newData.annotations || []), ...oldData.annotations];
+        }
+    } else {
+        // Move data to new date
+        journalCanvasData[newDate] = journalCanvasData[oldDateString];
+    }
+
+    // Delete old date entry
+    delete journalCanvasData[oldDateString];
+
+    // Save to localStorage
+    saveJournalCanvasData();
+
+    // Update current date if we changed the active one
+    if (currentJournalDate === oldDateString) {
+        currentJournalDate = newDate;
+        updateJournalWatermark();
+    }
+
+    // Refresh the dates list
+    renderDatesList();
+}
+
+function deleteJournalDate(dateString) {
+    // Don't allow deleting today
+    const today = getTodayDateString();
+    if (dateString === today) {
+        alert("Cannot delete today's journal. You can clear the canvas instead.");
+        return;
+    }
+
+    // Check if there's content
+    const data = journalCanvasData[dateString];
+    const hasContent = data && (data.nodes?.length > 0 || data.annotations?.length > 0);
+
+    if (hasContent) {
+        const confirmDelete = window.confirm(`Delete journal for ${formatDisplayDate(dateString)}? This will permanently remove all nodes and annotations.`);
+        if (!confirmDelete) return;
+    }
+
+    // If we're deleting the current date, change currentJournalDate FIRST
+    // to prevent saveCurrentJournalCanvas from recreating the entry
+    const wasCurrentDate = (currentJournalDate === dateString);
+    if (wasCurrentDate) {
+        currentJournalDate = today;
+    }
+
+    // Delete the entry
+    delete journalCanvasData[dateString];
+    saveJournalCanvasData();
+
+    // If we deleted the current date, load today's canvas
+    if (wasCurrentDate) {
+        loadJournalCanvasForDate(today);
+        updateJournalWatermark();
+    }
+
+    // Refresh the dates list
+    renderDatesList();
+}
+
+function setupJournalDateContextMenu() {
+    // Hide menu when clicking anywhere
+    document.addEventListener('click', hideJournalDateContextMenu);
+
+    // Handle menu item clicks
+    const menu = document.getElementById('journal-date-context-menu');
+    if (menu) {
+        menu.addEventListener('click', (e) => {
+            const action = e.target.dataset.action;
+            if (!contextMenuDateString) return;
+
+            if (action === 'change-date') {
+                changeJournalDate(contextMenuDateString);
+            } else if (action === 'delete-date') {
+                deleteJournalDate(contextMenuDateString);
+            }
+
+            hideJournalDateContextMenu();
+        });
+    }
+}
 
 // Initialize on DOM load
 if (document.readyState === 'loading') {
